@@ -1,18 +1,80 @@
 services:
-  db:
+  postgres:
     image: postgres:17
+    container_name: shopnow-postgres
     ports:
-      - ${DATABASE_PORT}:5432
-    env_file:
-      - .env
+      - "${DATABASE_PORT:-5432}:5432"
     environment:
-      - POSTGRES_DB=${DATABASE_NAME}
-      - POSTGRES_USER=${DATABASE_USER}
-      - POSTGRES_PASSWORD=${DATABASE_PASS}
-      - TZ=America/Asuncion
+      POSTGRES_DB: ${DATABASE_NAME:-shopnow}
+      POSTGRES_USER: ${DATABASE_USER:-shopnow}
+      POSTGRES_PASSWORD: ${DATABASE_PASS:-shopnow}
+      TZ: America/Asuncion
     volumes:
-      - db:/var/lib/postgresql/data
-    restart: always
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-shopnow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shopnow-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: shopnow-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shopnow-network
+    restart: unless-stopped
+
+  # Redis Insight - Web UI for Redis (optional, for development)
+  redis-insight:
+    image: redis/redisinsight:latest
+    container_name: shopnow-redis-insight
+    ports:
+      - "5540:5540"
+    volumes:
+      - redis_insight_data:/data
+    networks:
+      - shopnow-network
+    restart: unless-stopped
+    profiles:
+      - dev
+
+  # pgAdmin - Web UI for PostgreSQL (optional, for development)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: shopnow-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@shopnow.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - shopnow-network
+    restart: unless-stopped
+    profiles:
+      - dev
 
 volumes:
-  db:
+  postgres_data:
+  redis_data:
+  redis_insight_data:
+  pgadmin_data:
+
+networks:
+  shopnow-network:
+    driver: bridge

@@ -1,57 +1,114 @@
-# Shop Now Backend (Clean Architecture MVP)
+# ShopNow - E-commerce Platform
 
-E-commerce backend (filosofía Shopify: lanzar rápido, iterar y escalar) con:
+Modern e-commerce platform built with **Hexagonal Architecture** and **Domain-Driven Design (DDD)** principles.
 
-- Java 21
-- Spring Boot 3
-- Gradle (Kotlin DSL)
-- Postgres + Flyway
-- Clean Architecture (domain / application / infrastructure / interfaces web)
+## Architecture
 
-## Esquema Inicial
+- **Hexagonal Architecture** (Ports & Adapters)
+- **Domain-Driven Design** with Bounded Contexts
+- **Reactive Programming** with Spring WebFlux
+- **Event-Driven Architecture** for inter-context communication
+- **CQRS** pattern (Command Query Responsibility Segregation)
 
-Migración inicial (`V1__initial_schema.sql`) basada exactamente en el esquema proporcionado (nombres entrecomillados y tipos decimal). Se recomienda más adelante normalizar a snake_case + UUID nativo.
+## Tech Stack
 
-## Capas
+### Backend
+- **Kotlin 2.1.0** - Primary language
+- **Java 21** - JVM target
+- **Spring Boot 3.4.0** - Framework
+- **Spring WebFlux** - Reactive web framework
+- **Spring Data R2DBC** - Reactive database access
+- **PostgreSQL 17** - Primary database
+- **Redis 7** - Caching layer
+- **Flyway** - Database migrations
 
-```
-src/main/java/com/shopnow
-	├─ domain/            # Entidades de dominio + puertos (repos)
-	├─ application/       # Casos de uso (servicios y DTO commands)
-	├─ infrastructure/    # Adaptadores (persistence, web, config)
-	└─ ShopNowApplication.java
-```
+## Bounded Contexts
 
-## Endpoints MVP (Products)
+The system is organized into 10 independent bounded contexts:
 
-| Método | Path               | Descripción      |
-| ------ | ------------------ | ---------------- |
-| POST   | /api/products      | Crea un producto |
-| GET    | /api/products/{id} | Obtiene producto |
-| GET    | /api/products      | Lista productos  |
+1. **Catalog** - Product catalog, categories, inventory
+2. **Identity** - User management, authentication, authorization
+3. **Shopping** - Shopping cart, wishlist, reviews
+4. **Orders** - Order management, order lifecycle
+5. **Payment** - Payment processing, transactions
+6. **Shipping** - Shipping methods, tracking, delivery
+7. **Promotion** - Discounts, coupons, promotional campaigns
+8. **Partner** - Affiliates, suppliers
+9. **Notification** - User notifications, alerts
+10. **Audit** - Audit logging, activity tracking
 
-## Variables de entorno
+## Getting Started
 
-```
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=shopnow
-DB_USER=shopnow
-DB_PASSWORD=shopnow
-PORT=8080
-```
+### Prerequisites
 
-## Ejecutar
+- Java 21 or higher
+- Docker and Docker Compose
+- Gradle 8.10+ (wrapper included)
+
+### Quick Start
 
 ```bash
-gradle wrapper --gradle-version 8.10
+# 1. Clone and setup
+cp .env.example .env
+
+# 2. Start infrastructure
+docker-compose up -d
+
+# 3. Run migrations
+./gradlew flywayMigrate
+
+# 4. Run application
 ./gradlew bootRun
 ```
 
-## Próximos pasos sugeridos
+### Verify Setup
 
-- Implementar Users / Orders / Cart / Wishlist / Inventory
-- Añadir autenticación (JWT / API Key)
-- Migrar IDs a tipo UUID nativo (requiere nueva migración)
-- Añadir índices y constraints únicos (ej. Users.username, Users.email)
-- Tests con Testcontainers
+- Health: http://localhost:8080/actuator/health
+- Swagger UI: http://localhost:8080/swagger-ui.html
+
+## Documentation
+
+**Start here**: [ONBOARDING.md](docs/ONBOARDING.md)
+
+Complete documentation:
+- [PRD.md](docs/PRD.md) - Product requirements
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Technical architecture
+- [HEXAGONAL_ARCHITECTURE.md](docs/HEXAGONAL_ARCHITECTURE.md) - Architecture pattern
+- [DDD_GUIDE.md](docs/DDD_GUIDE.md) - Domain-Driven Design guide
+- [BOUNDED_CONTEXTS.md](docs/BOUNDED_CONTEXTS.md) - Context details
+
+## Development
+
+```bash
+# Run tests
+./gradlew test
+
+# Check migrations
+./gradlew flywayInfo
+
+# Start with dev tools (pgAdmin, Redis Insight)
+docker-compose --profile dev up -d
+```
+
+## Roadmap
+
+### Phase 1: Foundation (Current)
+- ✅ Architecture documentation
+- ✅ Infrastructure setup
+- ✅ Dependency configuration
+- 🔄 Schema migrations
+- 🔄 Project restructuring
+
+### Phase 2: Catalog MVP
+- Product management
+- Category management
+- Inventory tracking
+
+### Phase 3+
+- Shopping & Orders
+- Reviews & ratings
+- Promotions & notifications
+
+---
+
+**Built with ❤️ using Hexagonal Architecture & Domain-Driven Design**
