@@ -1,11 +1,11 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
-    id("org.springframework.boot") version "3.3.2"
-    id("io.spring.dependency-management") version "1.1.5"
-    id("org.jetbrains.kotlin.jvm") version "1.9.24"
-    id("org.jetbrains.kotlin.plugin.spring") version "1.9.24"
-    id("org.jetbrains.kotlin.plugin.jpa") version "1.9.24"
+    id("org.springframework.boot") version "3.4.0"
+    id("io.spring.dependency-management") version "1.1.6"
+    id("org.jetbrains.kotlin.jvm") version "2.1.0"
+    id("org.jetbrains.kotlin.plugin.spring") version "2.1.0"
+    id("org.jetbrains.kotlin.plugin.jpa") version "2.1.0"
 }
 
 group = "com.shopnow"
@@ -23,19 +23,73 @@ repositories {
     mavenCentral()
 }
 
+extra["testcontainersVersion"] = "1.20.4"
+
 dependencies {
-    implementation("org.springframework.boot:spring-boot-starter-web")
+    // WebFlux for reactive web (replaces spring-boot-starter-web)
+    implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("org.springframework.boot:spring-boot-starter-validation")
-    implementation("org.springframework.boot:spring-boot-starter-data-jpa")
-    implementation("org.flywaydb:flyway-core")
+
+    // R2DBC for reactive database access
+    implementation("org.springframework.boot:spring-boot-starter-data-r2dbc")
+    implementation("io.r2dbc:r2dbc-postgresql:1.0.7.RELEASE")
+
+    // JDBC for synchronous operations (when needed)
+    implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
     runtimeOnly("org.postgresql:postgresql")
 
-    implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
+    // Redis for caching
+    implementation("org.springframework.boot:spring-boot-starter-data-redis-reactive")
 
-    testImplementation("org.springframework.boot:spring-boot-starter-test")
+    // Flyway for database migrations
+    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-database-postgresql")
+
+    // Coroutines support
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor:1.9.0")
+    implementation("io.projectreactor.kotlin:reactor-kotlin-extensions:1.2.3")
+
+    // Jackson for JSON
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+
+    // Kotlin standard library
+    implementation("org.jetbrains.kotlin:kotlin-reflect")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib")
+
+    // OpenAPI/Swagger documentation
+    implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:2.7.0")
+
+    // Actuator for monitoring
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
+
+    // Testing
+    testImplementation("org.springframework.boot:spring-boot-starter-test") {
+        exclude(group = "org.junit.vintage", module = "junit-vintage-engine")
+    }
+    testImplementation("io.projectreactor:reactor-test")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+
+    // Kotest for Kotlin-friendly testing
+    testImplementation("io.kotest:kotest-runner-junit5:5.9.1")
+    testImplementation("io.kotest:kotest-assertions-core:5.9.1")
+    testImplementation("io.kotest:kotest-property:5.9.1")
+
+    // MockK for Kotlin mocking
+    testImplementation("io.mockk:mockk:1.13.13")
+    testImplementation("com.ninja-squad:springmockk:4.0.2")
+
+    // Testcontainers for integration testing
+    testImplementation("org.testcontainers:testcontainers")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
+    testImplementation("org.testcontainers:r2dbc")
+}
+
+dependencyManagement {
+    imports {
+        mavenBom("org.testcontainers:testcontainers-bom:${property("testcontainersVersion")}")
+    }
 }
 
 tasks.withType<KotlinCompile> {
@@ -44,4 +98,6 @@ tasks.withType<KotlinCompile> {
     }
 }
 
-tasks.withType<Test> { useJUnitPlatform() }
+tasks.withType<Test> {
+    useJUnitPlatform()
+}
