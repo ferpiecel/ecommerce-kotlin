@@ -1,5 +1,11 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
+buildscript {
+    dependencies {
+        classpath("org.postgresql:postgresql:42.7.4")
+    }
+}
+
 plugins {
     id("org.springframework.boot") version "3.4.0"
     id("io.spring.dependency-management") version "1.1.6"
@@ -116,6 +122,7 @@ flyway {
     url = System.getenv("DB_URL") ?: "jdbc:postgresql://localhost:5432/shopnow"
     user = System.getenv("DB_USER") ?: "shopnow"
     password = System.getenv("DB_PASSWORD") ?: "shopnow"
+    driver = "org.postgresql.Driver"
     locations = arrayOf("classpath:db/migration")
     baselineOnMigrate = true
     schemas = arrayOf("catalog", "identity", "shopping", "orders", "payment", "shipping", "promotion", "partner", "notification", "audit", "events")
