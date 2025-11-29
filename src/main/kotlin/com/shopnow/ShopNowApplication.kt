@@ -6,5 +6,7 @@ import org.springframework.boot.runApplication
 @SpringBootApplication
 class ShopNowApplication
 
-fun main(args: Array<String>) = runApplication<ShopNowApplication>(*args)
+fun main(args: Array<String>) {
+    runApplication<ShopNowApplication>(*args)
+}
 

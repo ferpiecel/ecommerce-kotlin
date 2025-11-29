@@ -6,6 +6,7 @@ plugins {
     id("org.jetbrains.kotlin.jvm") version "2.1.0"
     id("org.jetbrains.kotlin.plugin.spring") version "2.1.0"
     id("org.jetbrains.kotlin.plugin.jpa") version "2.1.0"
+    id("org.flywaydb.flyway") version "10.21.0"
 }
 
 group = "com.shopnow"
@@ -17,6 +18,17 @@ java {
 
 kotlin {
     jvmToolchain(21)
+    compilerOptions {
+        freeCompilerArgs.add("-Xjsr305=strict")
+    }
+}
+
+tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
+    mainClass.set("com.shopnow.ShopNowApplicationKt")
+}
+
+tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
+    mainClass.set("com.shopnow.ShopNowApplicationKt")
 }
 
 repositories {
@@ -32,7 +44,7 @@ dependencies {
 
     // R2DBC for reactive database access
     implementation("org.springframework.boot:spring-boot-starter-data-r2dbc")
-    implementation("io.r2dbc:r2dbc-postgresql:1.0.7.RELEASE")
+    runtimeOnly("org.postgresql:r2dbc-postgresql")
 
     // JDBC for synchronous operations (when needed)
     implementation("org.springframework.boot:spring-boot-starter-data-jdbc")
@@ -44,6 +56,9 @@ dependencies {
     // Flyway for database migrations
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
+
+    // PostgreSQL JDBC driver for Flyway
+    implementation("org.postgresql:postgresql")
 
     // Coroutines support
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
@@ -92,12 +107,16 @@ dependencyManagement {
     }
 }
 
-tasks.withType<KotlinCompile> {
-    compilerOptions {
-        freeCompilerArgs.add("-Xjsr305=strict")
-    }
-}
-
 tasks.withType<Test> {
     useJUnitPlatform()
+}
+
+// Flyway configuration
+flyway {
+    url = System.getenv("DB_URL") ?: "jdbc:postgresql://localhost:5432/shopnow"
+    user = System.getenv("DB_USER") ?: "shopnow"
+    password = System.getenv("DB_PASSWORD") ?: "shopnow"
+    locations = arrayOf("classpath:db/migration")
+    baselineOnMigrate = true
+    schemas = arrayOf("catalog", "identity", "shopping", "orders", "payment", "shipping", "promotion", "partner", "notification", "audit", "events")
 }
