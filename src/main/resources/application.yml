@@ -59,8 +59,8 @@ spring:
           max-wait: -1ms
 
   # WebFlux - Reactive Web Configuration
-  webflux:
-    base-path: /api
+  # webflux:
+  #   base-path: /api  # Not needed, controllers already have /api prefix
 
   # Jackson - JSON Configuration
   jackson:
