@@ -17,6 +17,15 @@ class EntityNotFoundException(
 ) : DomainException("$entityType with id $entityId not found")
 
 /**
+ * Not Found Exception
+ * Generic exception for when a resource is not found
+ */
+class NotFoundException(
+    entityType: String,
+    entityId: Any
+) : DomainException("$entityType with id $entityId not found")
+
+/**
  * Business Rule Violation Exception
  */
 class BusinessRuleViolationException(

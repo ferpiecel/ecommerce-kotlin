@@ -81,6 +81,9 @@ dependencies {
     // OpenAPI/Swagger documentation
     implementation("org.springdoc:springdoc-openapi-starter-webflux-ui:2.7.0")
 
+    // Spring Security for BCrypt password encoding
+    implementation("org.springframework.security:spring-security-crypto")
+
     // Actuator for monitoring
     implementation("org.springframework.boot:spring-boot-starter-actuator")
 

@@ -1,4 +1,4 @@
-# Product Requirements Context (PRC)
+# Product Requirements Document (PRD)
 
 ## 1. Executive Summary
 
