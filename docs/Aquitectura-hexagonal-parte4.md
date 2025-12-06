@@ -1,150 +1,285 @@
 ---
 
+# 6. Principio de Responsabilidad Única (SRP)
+
+## 6.1 ¿Qué es el Principio de Responsabilidad Única?
+
+El Principio de Responsabilidad Única establece que **una clase debe tener una única razón para cambiar**.
+
+### Problema: Clase con múltiples responsabilidades
+
+```java
+// ❌ MAL: Esta clase hace demasiadas cosas
+public class Order {
+    
+    // Responsabilidad 1: Datos y reglas de negocio
+    public void addItem(Product product, int quantity) { }
+    public void confirm() { }
+    
+    // Responsabilidad 2: Persistencia (¿por qué sabe de JPA?)
+    @Transactional
+    public void saveToDatabase(EntityManager em) {
+        em.persist(this);
+    }
+    
+    // Responsabilidad 3: Notificaciones (¿por qué envía emails?)
+    public void sendConfirmationEmail(JavaMailSender mailSender) {
+        var message = mailSender.createMimeMessage();
+        // ...
+    }
+    
+    // Responsabilidad 4: Reportes
+    public byte[] generateInvoicePDF() { }
+}
+```
+
+### Solución: Separar responsabilidades
+
+```java
+// ✅ BIEN: Cada clase tiene UNA responsabilidad
+
+// Responsabilidad: Reglas de negocio del pedido
+public class Order {
+    public void addItem(Product product, int quantity) { }
+    public void confirm() { }
+    public Money calculateTotal() { }
+}
+
+// Responsabilidad: Persistir pedidos
+public interface OrderRepository {
+    void save(Order order);
+    Optional<Order> findById(OrderId id);
+}
+
+// Responsabilidad: Enviar notificaciones
+public interface NotificationService {
+    void sendOrderConfirmation(Order order);
+}
+
+// Responsabilidad: Generar documentos
+public interface InvoiceGenerator {
+    byte[] generatePDF(Order order);
+}
+```
+
+## 6.2 Separación Command/Query (CQRS light)
+
+```java
+// application/service/OrderCommandService.java
+// Responsabilidad: Ejecutar comandos (modificar estado)
+
+@Service
+@RequiredArgsConstructor
+@Transactional
+public class OrderCommandService implements OrderUseCases {
+    
+    private final OrderRepository orderRepository;
+    private final ProductRepository productRepository;
+    private final EventPublisher eventPublisher;
+
+    @Override
+    public OrderId createOrder(CreateOrderCommand command) {
+        var order = Order.create(CustomerId.of(command.customerId()));
+        
+        for (var itemRequest : command.items()) {
+            var product = productRepository.findById(ProductId.of(itemRequest.productId()))
+                .orElseThrow(() -> new ProductNotFoundException(itemRequest.productId()));
+            order.addItem(product, itemRequest.quantity());
+        }
+        
+        orderRepository.save(order);
+        eventPublisher.publishAll(order.pullDomainEvents());
+        
+        return order.getId();
+    }
+
+    @Override
+    public void confirmOrder(ConfirmOrderCommand command) {
+        var order = orderRepository.findById(OrderId.of(command.orderId()))
+            .orElseThrow(() -> new OrderNotFoundException(command.orderId()));
+        
+        order.confirm();
+        
+        orderRepository.save(order);
+        eventPublisher.publishAll(order.pullDomainEvents());
+    }
+}
+
+
+// application/service/OrderQueryService.java
+// Responsabilidad: Ejecutar queries (leer estado)
+
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class OrderQueryService {
+    
+    private final OrderRepository orderRepository;
+    private final OrderDTOMapper mapper;
+
+    public OrderDTO getOrder(GetOrderQuery query) {
+        var order = orderRepository.findById(OrderId.of(query.orderId()))
+            .orElseThrow(() -> new OrderNotFoundException(query.orderId()));
+        return mapper.toDTO(order);
+    }
+
+    public List<OrderDTO> listCustomerOrders(ListOrdersQuery query) {
+        return orderRepository.findByCustomer(CustomerId.of(query.customerId()))
+            .stream()
+            .map(mapper::toDTO)
+            .toList();
+    }
+
+    public Page<OrderDTO> searchOrders(SearchOrdersQuery query, Pageable pageable) {
+        // Usar especificaciones o criteria para búsqueda flexible
+        return orderRepository.findAll(pageable)
+            .map(mapper::toDTO);
+    }
+}
+```
+
+---
+
 # 7. Arquitectura Orientada a Eventos
 
 ## 7.1 ¿Por qué eventos?
 
-### El problema del acoplamiento temporal
+### El problema del acoplamiento
 
-Imagina este flujo cuando se confirma un pedido:
-
-1. Actualizar estado del pedido
-2. Reservar inventario
-3. Procesar pago
-4. Enviar email de confirmación
-5. Notificar al almacén
-6. Actualizar dashboard de ventas
-
-**Enfoque sincrónico (sin eventos):**
-- El usuario espera mientras todo esto ocurre
-- Si falla el paso 5, ¿qué pasa con los pasos 1-4?
-- Si el email está lento, todo es lento
-- Si agregamos un paso 7, hay que modificar código existente
-
-**Enfoque con eventos:**
-- El pedido se confirma y se publica un evento
-- Cada sistema reacciona de forma independiente
-- Si el email falla, el pedido ya está confirmado
-- Agregar comportamientos = agregar handlers
-
-## 7.2 Implementación de un Sistema de Eventos
-
-### Event Bus (Puerto)
-
-```typescript
-// application/ports/secondary/EventBus.ts
-
-export interface EventBus {
-  publish(event: DomainEvent): Promise<void>;
-  publishAll(events: DomainEvent[]): Promise<void>;
-  subscribe<T extends DomainEvent>(
-    eventType: string,
-    handler: EventHandler<T>
-  ): void;
-}
-
-export interface EventHandler<T extends DomainEvent> {
-  handle(event: T): Promise<void>;
-}
-```
-
-### Agregado que produce eventos
-
-```typescript
-export class Order {
-  private domainEvents: DomainEvent[] = [];
-
-  static create(customerId: CustomerId): Order {
-    const order = new Order(/* ... */);
+```java
+// ❌ MAL: El servicio conoce TODO lo que debe pasar
+@Service
+public class OrderService {
     
-    order.recordEvent(new OrderCreatedEvent(
-      order.id.value,
-      customerId.value
-    ));
+    private final OrderRepository orderRepository;
+    private final EmailService emailService;
+    private final InventoryService inventoryService;
+    private final AnalyticsService analyticsService;
+    private final LoyaltyService loyaltyService;
     
-    return order;
-  }
-
-  confirm(): void {
-    this.validateCanBeConfirmed();
-    this.status = OrderStatus.CONFIRMED;
-    
-    this.recordEvent(new OrderConfirmedEvent(
-      this.id.value,
-      this.customerId.value,
-      this.total().getAmount(),
-      this.getItemsSummary()
-    ));
-  }
-
-  protected recordEvent(event: DomainEvent): void {
-    this.domainEvents.push(event);
-  }
-
-  pullDomainEvents(): DomainEvent[] {
-    const events = [...this.domainEvents];
-    this.domainEvents = [];
-    return events;
-  }
-}
-```
-
-### Servicio de aplicación usando eventos
-
-```typescript
-export class OrderCommandService {
-  constructor(
-    private readonly orderRepository: OrderRepository,
-    private readonly eventBus: EventBus
-  ) {}
-
-  async confirmOrder(command: ConfirmOrderCommand): Promise<void> {
-    const order = await this.orderRepository.findById(
-      OrderId.from(command.orderId)
-    );
-    
-    if (!order) {
-      throw new OrderNotFoundError(command.orderId);
+    public void confirmOrder(String orderId) {
+        var order = orderRepository.findById(orderId);
+        order.confirm();
+        orderRepository.save(order);
+        
+        // El servicio conoce y coordina todo
+        emailService.sendConfirmation(order);
+        inventoryService.reserveStock(order);
+        analyticsService.recordSale(order);
+        loyaltyService.addPoints(order);
+        // ¿Y si mañana agrego otra cosa?
     }
-
-    order.confirm();
-    await this.orderRepository.save(order);
-
-    // Los handlers reaccionarán
-    const events = order.pullDomainEvents();
-    await this.eventBus.publishAll(events);
-  }
 }
 ```
 
-### Event Handlers
-
-```typescript
-export class SendConfirmationEmailHandler implements EventHandler<OrderConfirmedEvent> {
-  constructor(private readonly notificationService: NotificationService) {}
-
-  async handle(event: OrderConfirmedEvent): Promise<void> {
-    await this.notificationService.sendEmail({
-      to: event.customerEmail,
-      subject: `Pedido ${event.aggregateId} confirmado`,
-      templateId: 'order-confirmation',
-      data: { orderId: event.aggregateId, total: event.totalAmount }
-    });
-  }
+```java
+// ✅ BIEN: El servicio solo confirma y publica
+@Service
+public class OrderCommandService {
+    
+    private final OrderRepository orderRepository;
+    private final EventPublisher eventPublisher;
+    
+    public void confirmOrder(String orderId) {
+        var order = orderRepository.findById(orderId);
+        order.confirm();
+        orderRepository.save(order);
+        
+        // Solo publicamos que algo ocurrió
+        eventPublisher.publishAll(order.pullDomainEvents());
+    }
 }
 
-export class ReserveInventoryHandler implements EventHandler<OrderConfirmedEvent> {
-  constructor(private readonly inventoryService: InventoryService) {}
+// Cada handler reacciona independientemente
+```
 
-  async handle(event: OrderConfirmedEvent): Promise<void> {
-    for (const item of event.items) {
-      await this.inventoryService.reserve({
-        productId: item.productId,
-        quantity: item.quantity,
-        orderId: event.aggregateId
-      });
+## 7.2 Event Handlers (Java 21)
+
+```java
+// application/eventhandler/SendOrderConfirmationEmailHandler.java
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class SendOrderConfirmationEmailHandler {
+    
+    private final NotificationService notificationService;
+    private final CustomerRepository customerRepository;
+
+    @EventListener
+    @Async
+    public void handle(OrderConfirmedEvent event) {
+        log.info("Handling OrderConfirmedEvent for order {}", event.orderId());
+        
+        var customer = customerRepository.findById(event.customerId())
+            .orElseThrow(() -> new CustomerNotFoundException(event.customerId().value()));
+        
+        notificationService.sendEmail(new EmailNotification(
+            customer.getEmail(),
+            "Order Confirmed - #" + event.orderId().value(),
+            "order-confirmation",
+            Map.of(
+                "orderId", event.orderId().value(),
+                "total", event.totalAmount().amount().toString(),
+                "currency", event.totalAmount().currency().name(),
+                "items", event.items()
+            )
+        ));
+        
+        log.info("Confirmation email sent for order {}", event.orderId());
     }
-  }
+}
+
+
+// application/eventhandler/ReserveInventoryHandler.java
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class ReserveInventoryHandler {
+    
+    private final InventoryService inventoryService;
+
+    @EventListener
+    @Async
+    public void handle(OrderConfirmedEvent event) {
+        log.info("Reserving inventory for order {}", event.orderId());
+        
+        var reservationItems = event.items().stream()
+            .map(item -> new ReservationRequest.ReservationItem(
+                item.productId(),
+                item.quantity()
+            ))
+            .toList();
+        
+        var reservation = inventoryService.reserve(new ReservationRequest(
+            event.orderId().value(),
+            reservationItems
+        ));
+        
+        log.info("Inventory reserved: {}", reservation.id());
+    }
+}
+
+
+// application/eventhandler/UpdateSalesMetricsHandler.java
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class UpdateSalesMetricsHandler {
+    
+    private final MetricsService metricsService;
+
+    @EventListener
+    @Async
+    public void handle(OrderConfirmedEvent event) {
+        metricsService.recordSale(
+            event.orderId().value(),
+            event.totalAmount(),
+            event.occurredOn()
+        );
+    }
 }
 ```
 
@@ -152,162 +287,126 @@ export class ReserveInventoryHandler implements EventHandler<OrderConfirmedEvent
 
 # 8. Flujos de Aplicación Completos
 
-## 8.1 Flujo: Crear y Confirmar un Pedido
-
-### Diagrama del flujo
-
-```
-┌──────────┐     HTTP POST      ┌────────────────┐
-│  Usuario │ ────────────────▶  │ REST Controller│
-└──────────┘                    │  (Adaptador)   │
-                                └───────┬────────┘
-                                        │
-                                        ▼ CreateOrderCommand
-                                ┌───────────────────┐
-                                │  OrderService     │
-                                │  (Aplicación)     │
-                                └───────┬───────────┘
-                                        │
-                    ┌───────────────────┼───────────────────┐
-                    ▼                   ▼                   ▼
-            ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-            │ ProductRepo  │   │    Order     │   │  OrderRepo   │
-            │ (findById)   │   │  (Dominio)   │   │   (save)     │
-            └──────────────┘   └──────────────┘   └──────────────┘
-                                        │
-                                        ▼ OrderCreatedEvent
-                                ┌───────────────────┐
-                                │    Event Bus      │
-                                └───────┬───────────┘
-                                        │
-                    ┌───────────────────┼───────────────────┐
-                    ▼                   ▼                   ▼
-            ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-            │ EmailHandler │   │ Analytics    │   │   Logging    │
-            └──────────────┘   └──────────────┘   └──────────────┘
-```
-
-## 8.2 Patrón Saga: Operaciones Distribuidas
+## 8.1 Patrón Saga: Operaciones Distribuidas
 
 ### ¿Qué es una Saga?
 
-Una Saga es un patrón para manejar transacciones que abarcan múltiples servicios o agregados. En lugar de una transacción ACID tradicional, usa una secuencia de transacciones locales con **compensaciones** si algo falla.
+Una Saga es un patrón para manejar transacciones que abarcan múltiples servicios. Usa una secuencia de transacciones locales con **compensaciones** si algo falla.
 
-### ¿Cuándo usar Sagas?
+### Ejemplo: Saga de Pago de Pedido (Java 21)
 
-Cuando una operación de negocio:
-- Involucra múltiples agregados
-- Involucra servicios externos (pagos, inventario)
-- No puede ejecutarse en una única transacción
-- Necesita garantías de consistencia eventual
+```java
+// application/saga/OrderPaymentSaga.java
 
-### El concepto de compensación
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class OrderPaymentSaga {
+    
+    private final OrderRepository orderRepository;
+    private final InventoryService inventoryService;
+    private final PaymentGateway paymentGateway;
+    private final EventPublisher eventPublisher;
 
-La compensación es la acción que "deshace" un paso anterior. No es un rollback técnico (eso sería una transacción), sino una operación de negocio que revierte el efecto.
-
-**Ejemplo:**
-- Paso: "Reservar inventario"
-- Compensación: "Liberar inventario reservado"
-
-### Ejemplo: Saga de Pago de Pedido
-
-Imagina el proceso de pagar un pedido:
-
-```
-Flujo exitoso:
-[Reservar Inventario] ✓ → [Procesar Pago] ✓ → [Confirmar Reserva] ✓ → [Marcar Pagado] ✓
-
-Flujo con fallo y compensación:
-[Reservar Inventario] ✓ → [Procesar Pago] ✗ → [COMPENSAR: Liberar Inventario]
-```
-
-### Implementación
-
-```typescript
-export class OrderPaymentSaga {
-  constructor(
-    private readonly orderRepository: OrderRepository,
-    private readonly inventoryService: InventoryService,
-    private readonly paymentGateway: PaymentGateway,
-    private readonly eventBus: EventBus
-  ) {}
-
-  async execute(orderId: OrderId): Promise<PaymentResult> {
-    const order = await this.orderRepository.findById(orderId);
-    if (!order) {
-      throw new OrderNotFoundError(orderId.value);
+    @Transactional
+    public PaymentResult execute(OrderId orderId) {
+        log.info("[Saga] Starting payment saga for order {}", orderId);
+        
+        var order = orderRepository.findById(orderId)
+            .orElseThrow(() -> new OrderNotFoundException(orderId.value()));
+        
+        // Variable para rastrear qué necesita compensación
+        InventoryReservation inventoryReservation = null;
+        
+        try {
+            // PASO 1: Reservar inventario
+            log.info("[Saga] Step 1: Reserving inventory");
+            inventoryReservation = reserveInventory(order);
+            
+            // PASO 2: Procesar pago
+            log.info("[Saga] Step 2: Processing payment");
+            var paymentResult = processPayment(order);
+            
+            if (!paymentResult.success()) {
+                throw new PaymentFailedException(paymentResult.errorMessage());
+            }
+            
+            // PASO 3: Confirmar reserva de inventario
+            log.info("[Saga] Step 3: Confirming inventory reservation");
+            inventoryService.confirmReservation(inventoryReservation.id());
+            
+            // PASO 4: Marcar pedido como pagado
+            log.info("[Saga] Step 4: Marking order as paid");
+            order.markAsPaid(paymentResult.transactionId());
+            orderRepository.save(order);
+            
+            // Publicar evento de éxito
+            eventPublisher.publish(new OrderPaidEvent(
+                orderId,
+                paymentResult.transactionId(),
+                order.calculateTotal()
+            ));
+            
+            log.info("[Saga] Completed successfully");
+            return paymentResult;
+            
+        } catch (Exception e) {
+            // COMPENSACIÓN
+            log.error("[Saga] Error: {}. Starting compensation...", e.getMessage());
+            compensate(order, inventoryReservation, e);
+            throw e;
+        }
     }
-
-    // Variable para rastrear qué necesita compensación
-    let inventoryReservation: InventoryReservation | null = null;
-
-    try {
-      // PASO 1: Reservar inventario
-      console.log(`[Saga] Paso 1: Reservando inventario`);
-      inventoryReservation = await this.inventoryService.reserve({
-        orderId: orderId.value,
-        items: order.getItemsSummary()
-      });
-
-      // PASO 2: Procesar pago
-      console.log(`[Saga] Paso 2: Procesando pago`);
-      const paymentResult = await this.paymentGateway.processPayment({
-        orderId: orderId.value,
-        amount: order.total().getAmount(),
-        currency: order.total().getCurrency(),
-        customerId: order.customerId.value
-      });
-
-      if (!paymentResult.success) {
-        throw new PaymentFailedError(paymentResult.errorMessage);
-      }
-
-      // PASO 3: Confirmar reserva de inventario
-      console.log(`[Saga] Paso 3: Confirmando reserva`);
-      await this.inventoryService.confirmReservation(inventoryReservation.id);
-
-      // PASO 4: Marcar pedido como pagado
-      console.log(`[Saga] Paso 4: Marcando como pagado`);
-      order.markAsPaid(paymentResult.transactionId);
-      await this.orderRepository.save(order);
-
-      // Publicar evento de éxito
-      await this.eventBus.publish(new OrderPaidEvent(
-        orderId.value,
-        paymentResult.transactionId
-      ));
-
-      return paymentResult;
-
-    } catch (error) {
-      // COMPENSACIÓN
-      console.log(`[Saga] Error: ${error.message}. Compensando...`);
-
-      if (inventoryReservation) {
-        console.log(`[Saga] Compensando: Liberando inventario`);
-        await this.inventoryService.releaseReservation(inventoryReservation.id);
-      }
-
-      order.markPaymentFailed(error.message);
-      await this.orderRepository.save(order);
-
-      await this.eventBus.publish(new OrderPaymentFailedEvent(
-        orderId.value,
-        error.message
-      ));
-
-      throw error;
+    
+    private InventoryReservation reserveInventory(Order order) {
+        var items = order.getItemsSummary().stream()
+            .map(item -> new ReservationRequest.ReservationItem(
+                item.productId(),
+                item.quantity()
+            ))
+            .toList();
+        
+        return inventoryService.reserve(new ReservationRequest(
+            order.getId().value(),
+            items
+        ));
     }
-  }
+    
+    private PaymentResult processPayment(Order order) {
+        return paymentGateway.processPayment(new PaymentRequest(
+            order.getId(),
+            order.calculateTotal(),
+            order.getCustomerId(),
+            PaymentMethod.defaultCard()
+        ));
+    }
+    
+    private void compensate(Order order, InventoryReservation reservation, Exception cause) {
+        // Liberar inventario si fue reservado
+        if (reservation != null) {
+            try {
+                log.info("[Saga] Compensating: Releasing inventory reservation");
+                inventoryService.releaseReservation(reservation.id());
+            } catch (Exception e) {
+                log.error("[Saga] Failed to release inventory: {}", e.getMessage());
+            }
+        }
+        
+        // Marcar pedido como fallido
+        try {
+            order.markPaymentFailed(cause.getMessage());
+            orderRepository.save(order);
+            
+            eventPublisher.publish(new OrderPaymentFailedEvent(
+                order.getId(),
+                cause.getMessage()
+            ));
+        } catch (Exception e) {
+            log.error("[Saga] Failed to mark order as failed: {}", e.getMessage());
+        }
+    }
 }
 ```
-
-**Puntos clave de las Sagas:**
-
-1. **Cada paso debe ser idempotente**: Si se reintenta, no debe causar duplicados
-2. **Cada paso debe tener una compensación**: Una forma de "deshacer"
-3. **El orden importa**: Primero lo más fácil de compensar
-4. **Registra todo**: Para debugging y auditoría
 
 ---
 
@@ -317,239 +416,313 @@ export class OrderPaymentSaga {
 
 ### El problema
 
-Cuando guardas un agregado y publicas eventos, tienes dos operaciones:
-1. Guardar en base de datos
-2. Publicar en el message broker
+Cuando guardas un agregado y publicas eventos, tienes dos operaciones que deben ser atómicas.
 
-¿Qué pasa si la BD se guarda pero el broker falla? Datos inconsistentes.
+### La solución (Java 21)
 
-### La solución
+```java
+// infrastructure/adapter/output/persistence/TransactionalOrderRepository.java
 
-El Outbox Pattern guarda los eventos en la MISMA transacción que los datos. Un proceso separado lee estos eventos y los publica.
+@Repository
+@RequiredArgsConstructor
+public class TransactionalOrderRepository implements OrderRepository {
+    
+    private final JdbcTemplate jdbcTemplate;
+    private final OrderPersistenceMapper mapper;
+    private final ObjectMapper objectMapper;
 
-```
-┌─────────────────────────────────────────────────────┐
-│                   TRANSACCIÓN                        │
-│                                                      │
-│   ┌─────────────────┐    ┌─────────────────┐        │
-│   │  Tabla: Orders  │    │ Tabla: Outbox   │        │
-│   │                 │    │                 │        │
-│   │  UPDATE order   │    │  INSERT event   │        │
-│   │  SET status=    │    │  (pendiente)    │        │
-│   │  'CONFIRMED'    │    │                 │        │
-│   └─────────────────┘    └─────────────────┘        │
-└─────────────────────────────────────────────────────┘
-                            │
-                            │ Proceso separado
-                            ▼
-                    ┌───────────────┐
-                    │ Outbox Worker │
-                    │ 1. Lee evento │
-                    │ 2. Publica    │
-                    │ 3. Marca OK   │
-                    └───────────────┘
-```
-
-### Implementación
-
-```typescript
-export class TransactionalOrderRepository implements OrderRepository {
-  async save(order: Order): Promise<void> {
-    const events = order.pullDomainEvents();
-
-    await this.db.transaction(async (tx) => {
-      // Guardar el pedido
-      await tx.query('INSERT INTO orders...', [/* order data */]);
-
-      // Guardar eventos en outbox (misma transacción)
-      for (const event of events) {
-        await tx.query(
-          `INSERT INTO outbox_messages 
-           (id, aggregate_type, aggregate_id, event_type, payload)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [
-            event.eventId,
-            event.aggregateType,
-            event.aggregateId,
-            event.eventType,
-            JSON.stringify(event)
-          ]
-        );
-      }
-    });
-  }
-}
-
-// Proceso que publica eventos pendientes
-export class OutboxWorker {
-  async processOutbox(): Promise<void> {
-    const messages = await this.db.query(
-      'SELECT * FROM outbox WHERE processed_at IS NULL LIMIT 100'
-    );
-
-    for (const msg of messages.rows) {
-      try {
-        await this.messageBroker.publish(msg.event_type, msg.payload);
-        await this.db.query(
-          'UPDATE outbox SET processed_at = NOW() WHERE id = $1',
-          [msg.id]
-        );
-      } catch (error) {
-        // Se reintentará en la próxima ejecución
-        console.error(`Failed to process ${msg.id}:`, error);
-      }
+    @Override
+    @Transactional
+    public void save(Order order) {
+        var events = order.pullDomainEvents();
+        
+        // Guardar el pedido
+        saveOrder(order);
+        
+        // Guardar eventos en outbox (misma transacción)
+        for (var event : events) {
+            saveToOutbox(event);
+        }
     }
-  }
+    
+    private void saveOrder(Order order) {
+        jdbcTemplate.update("""
+            INSERT INTO orders (id, customer_id, status, total_amount, total_currency, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+                status = EXCLUDED.status,
+                total_amount = EXCLUDED.total_amount,
+                updated_at = NOW()
+            """,
+            order.getId().value(),
+            order.getCustomerId().value(),
+            order.getStatus().name(),
+            order.calculateTotal().amount(),
+            order.calculateTotal().currency().name(),
+            order.getCreatedAt()
+        );
+    }
+    
+    private void saveToOutbox(DomainEvent event) {
+        try {
+            jdbcTemplate.update("""
+                INSERT INTO outbox_messages 
+                (id, aggregate_type, aggregate_id, event_type, payload, created_at)
+                VALUES (?, ?, ?, ?, ?::jsonb, ?)
+                """,
+                event.eventId(),
+                event.aggregateType(),
+                event.aggregateId(),
+                event.eventType(),
+                objectMapper.writeValueAsString(event),
+                event.occurredOn()
+            );
+        } catch (JsonProcessingException e) {
+            throw new OutboxSerializationException(e);
+        }
+    }
+}
 
-  start(): void {
-    setInterval(() => this.processOutbox(), 1000);
-  }
+
+// infrastructure/worker/OutboxWorker.java
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class OutboxWorker {
+    
+    private final JdbcTemplate jdbcTemplate;
+    private final RabbitTemplate rabbitTemplate;
+
+    @Scheduled(fixedRate = 1000)
+    @Transactional
+    public void processOutbox() {
+        var messages = jdbcTemplate.query("""
+            SELECT id, aggregate_type, event_type, payload 
+            FROM outbox_messages 
+            WHERE processed_at IS NULL 
+            ORDER BY created_at 
+            LIMIT 100
+            FOR UPDATE SKIP LOCKED
+            """,
+            (rs, rowNum) -> new OutboxMessage(
+                rs.getString("id"),
+                rs.getString("aggregate_type"),
+                rs.getString("event_type"),
+                rs.getString("payload")
+            )
+        );
+        
+        for (var message : messages) {
+            try {
+                var exchange = "domain." + message.aggregateType().toLowerCase();
+                rabbitTemplate.convertAndSend(exchange, message.eventType(), message.payload());
+                
+                jdbcTemplate.update(
+                    "UPDATE outbox_messages SET processed_at = NOW() WHERE id = ?",
+                    message.id()
+                );
+                
+                log.debug("Processed outbox message {}", message.id());
+            } catch (Exception e) {
+                log.error("Failed to process outbox message {}: {}", message.id(), e.getMessage());
+            }
+        }
+    }
+    
+    private record OutboxMessage(String id, String aggregateType, String eventType, String payload) {}
 }
 ```
 
-## 9.2 Specification Pattern
+## 9.2 Specification Pattern (Java 21)
 
-### El problema
+```java
+// domain/specification/Specification.java
 
-Las reglas de negocio complejas terminan duplicadas en múltiples lugares.
-
-### La solución
-
-Encapsular reglas en objetos reutilizables que pueden combinarse con AND, OR, NOT.
-
-```typescript
-// Base
-export abstract class CompositeSpecification<T> {
-  abstract isSatisfiedBy(candidate: T): boolean;
-
-  and(other: Specification<T>): Specification<T> {
-    return new AndSpecification(this, other);
-  }
-
-  or(other: Specification<T>): Specification<T> {
-    return new OrSpecification(this, other);
-  }
-
-  not(): Specification<T> {
-    return new NotSpecification(this);
-  }
+@FunctionalInterface
+public interface Specification<T> {
+    
+    boolean isSatisfiedBy(T candidate);
+    
+    default Specification<T> and(Specification<T> other) {
+        return candidate -> this.isSatisfiedBy(candidate) && other.isSatisfiedBy(candidate);
+    }
+    
+    default Specification<T> or(Specification<T> other) {
+        return candidate -> this.isSatisfiedBy(candidate) || other.isSatisfiedBy(candidate);
+    }
+    
+    default Specification<T> not() {
+        return candidate -> !this.isSatisfiedBy(candidate);
+    }
 }
 
-// Especificaciones concretas
-export class OrderIsConfirmedSpec extends CompositeSpecification<Order> {
-  isSatisfiedBy(order: Order): boolean {
-    return order.status === OrderStatus.CONFIRMED;
-  }
+
+// domain/specification/order/OrderSpecifications.java
+
+public final class OrderSpecifications {
+    
+    private OrderSpecifications() {}
+    
+    public static Specification<Order> isConfirmed() {
+        return order -> order.getStatus() == OrderStatus.CONFIRMED;
+    }
+    
+    public static Specification<Order> isPending() {
+        return order -> order.getStatus() == OrderStatus.PENDING;
+    }
+    
+    public static Specification<Order> exceedsAmount(Money minimumAmount) {
+        return order -> order.calculateTotal().isGreaterThan(minimumAmount);
+    }
+    
+    public static Specification<Order> isRecent(int daysThreshold) {
+        return order -> {
+            var threshold = Instant.now().minus(daysThreshold, ChronoUnit.DAYS);
+            return order.getCreatedAt().isAfter(threshold);
+        };
+    }
+    
+    public static Specification<Order> hasProduct(ProductId productId) {
+        return order -> order.getItems().stream()
+            .anyMatch(item -> item.getProductId().equals(productId));
+    }
+    
+    public static Specification<Order> belongsToCustomer(CustomerId customerId) {
+        return order -> order.getCustomerId().equals(customerId);
+    }
+    
+    // Especificaciones compuestas
+    public static Specification<Order> eligibleForFreeShipping() {
+        return isConfirmed()
+            .and(exceedsAmount(Money.of(100, Currency.USD)));
+    }
+    
+    public static Specification<Order> eligibleForPrioritySupport() {
+        return isConfirmed()
+            .and(exceedsAmount(Money.of(500, Currency.USD)))
+            .and(isRecent(30));
+    }
 }
 
-export class OrderExceedsAmountSpec extends CompositeSpecification<Order> {
-  constructor(private readonly minimumAmount: Money) { super(); }
 
-  isSatisfiedBy(order: Order): boolean {
-    return order.total().isGreaterThan(this.minimumAmount);
-  }
+// Uso
+var eligibleOrders = allOrders.stream()
+    .filter(OrderSpecifications.eligibleForFreeShipping()::isSatisfiedBy)
+    .toList();
+
+if (OrderSpecifications.eligibleForPrioritySupport().isSatisfiedBy(order)) {
+    order.upgradeToPrioritySupport();
 }
-
-// Uso combinado
-const eligibleForFreeShipping = new OrderIsConfirmedSpec()
-  .and(new OrderExceedsAmountSpec(Money.of(100, 'USD')));
-
-if (eligibleForFreeShipping.isSatisfiedBy(order)) {
-  order.applyFreeShipping();
-}
-
-// Filtrar colecciones
-const priorityOrders = allOrders.filter(o => 
-  eligibleForFreeShipping.isSatisfiedBy(o)
-);
 ```
 
-## 9.3 Anti-Corruption Layer (ACL)
+## 9.3 Anti-Corruption Layer (ACL) - Java 21
 
-### El problema
-
-Integrar con sistemas externos "contamina" el dominio con sus modelos.
-
-```typescript
-// ❌ MAL: El dominio conoce estructuras de Stripe
-class PaymentService {
-  async processPayment(order: Order): Promise<void> {
-    const stripeResponse = await stripe.charges.create({
-      amount: order.total * 100,  // Stripe usa centavos
-      currency: 'usd',
-      source: order.customer.stripeToken,  // ¿stripeToken en Customer?
-    });
-    order.paymentId = stripeResponse.id;  // Estructura de Stripe
-  }
-}
-```
-
-### La solución
-
-Una capa de traducción que protege el dominio.
-
-```typescript
+```java
 // El dominio define lo que necesita (puerto)
-export interface PaymentGateway {
-  processPayment(request: PaymentRequest): Promise<PaymentResult>;
+// application/port/output/PaymentGateway.java
+
+public interface PaymentGateway {
+    PaymentResult processPayment(PaymentRequest request);
+    RefundResult refund(String transactionId, Money amount);
 }
 
-export interface PaymentRequest {
-  orderId: OrderId;
-  amount: Money;
-  customerId: CustomerId;
-}
-
-export interface PaymentResult {
-  success: boolean;
-  transactionId: TransactionId;
-  errorMessage?: string;
-}
 
 // El ACL traduce entre Stripe y nuestro dominio
-export class StripePaymentGateway implements PaymentGateway {
-  async processPayment(request: PaymentRequest): Promise<PaymentResult> {
-    try {
-      // Traducir de nuestro modelo a Stripe
-      const stripeRequest = {
-        amount: this.toStripeCents(request.amount),
-        currency: request.amount.getCurrency().toLowerCase(),
-        customer: await this.getStripeCustomerId(request.customerId),
-      };
+// infrastructure/acl/stripe/StripePaymentGateway.java
 
-      const stripeResponse = await this.stripe.paymentIntents.create(stripeRequest);
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class StripePaymentGateway implements PaymentGateway {
+    
+    private final StripeClient stripeClient;
+    private final CustomerRepository customerRepository;
 
-      // Traducir de Stripe a nuestro modelo
-      return {
-        success: stripeResponse.status === 'succeeded',
-        transactionId: TransactionId.from(stripeResponse.id),
-      };
-    } catch (stripeError) {
-      // Traducir errores
-      return {
-        success: false,
-        transactionId: TransactionId.empty(),
-        errorMessage: this.mapStripeError(stripeError)
-      };
+    @Override
+    public PaymentResult processPayment(PaymentRequest request) {
+        try {
+            // Obtener Stripe Customer ID
+            var customer = customerRepository.findById(request.customerId())
+                .orElseThrow(() -> new CustomerNotFoundException(request.customerId().value()));
+            
+            var stripeCustomerId = customer.getStripeCustomerId()
+                .orElseThrow(() -> new PaymentConfigurationException("Customer not configured for payments"));
+            
+            // Traducir de nuestro modelo a Stripe
+            var params = PaymentIntentCreateParams.builder()
+                .setAmount(toStripeCents(request.amount()))
+                .setCurrency(request.amount().currency().name().toLowerCase())
+                .setCustomer(stripeCustomerId)
+                .setConfirm(true)
+                .putMetadata("order_id", request.orderId().value())
+                .putMetadata("source", "hexagonal-app")
+                .build();
+            
+            // Llamar a Stripe
+            var paymentIntent = stripeClient.paymentIntents().create(params);
+            
+            // Traducir respuesta de Stripe a nuestro modelo
+            return mapToPaymentResult(paymentIntent);
+            
+        } catch (StripeException e) {
+            // Traducir errores de Stripe a nuestro modelo
+            return mapStripeError(e);
+        }
     }
-  }
-
-  private toStripeCents(money: Money): number {
-    return Math.round(money.getAmount() * 100);
-  }
-
-  private mapStripeError(error: StripeError): string {
-    switch (error.type) {
-      case 'StripeCardError': return 'La tarjeta fue rechazada';
-      case 'StripeInvalidRequestError': return 'Datos de pago inválidos';
-      default: return 'Error procesando el pago';
+    
+    @Override
+    public RefundResult refund(String transactionId, Money amount) {
+        try {
+            var params = RefundCreateParams.builder()
+                .setPaymentIntent(transactionId)
+                .setAmount(toStripeCents(amount))
+                .build();
+            
+            var refund = stripeClient.refunds().create(params);
+            
+            return new RefundResult(
+                true,
+                refund.getId(),
+                null
+            );
+        } catch (StripeException e) {
+            return new RefundResult(false, null, mapStripeErrorMessage(e));
+        }
     }
-  }
+    
+    private long toStripeCents(Money money) {
+        return money.amount().multiply(BigDecimal.valueOf(100)).longValue();
+    }
+    
+    private PaymentResult mapToPaymentResult(PaymentIntent paymentIntent) {
+        var success = "succeeded".equals(paymentIntent.getStatus());
+        return new PaymentResult(
+            success,
+            paymentIntent.getId(),
+            Instant.ofEpochSecond(paymentIntent.getCreated()),
+            success ? null : "Payment status: " + paymentIntent.getStatus()
+        );
+    }
+    
+    private PaymentResult mapStripeError(StripeException e) {
+        var message = switch (e) {
+            case CardException ce -> "La tarjeta fue rechazada: " + ce.getDeclineCode();
+            case InvalidRequestException ire -> "Datos de pago inválidos";
+            case ApiException ae -> "Error temporal del servicio de pagos";
+            default -> "Error procesando el pago";
+        };
+        
+        log.error("Stripe error: {}", e.getMessage());
+        return PaymentResult.failed(message);
+    }
+    
+    private String mapStripeErrorMessage(StripeException e) {
+        return switch (e) {
+            case CardException ce -> "Refund failed: " + ce.getDeclineCode();
+            case InvalidRequestException ire -> "Invalid refund request";
+            default -> "Refund processing error";
+        };
+    }
 }
 ```
-
-**Beneficios del ACL:**
-- El dominio no conoce Stripe
-- Podríamos cambiar a PayPal sin tocar el dominio
-- Los errores de Stripe se traducen a errores de dominio
-- Los formatos se normalizan

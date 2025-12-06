@@ -2,7 +2,7 @@
 
 ## Guía Completa: De Básico a Avanzado
 
-*Con principios SOLID, orientación a eventos y ejemplos prácticos*
+*Con principios SOLID, orientación a eventos y ejemplos prácticos en Java 21*
 
 ---
 
@@ -50,8 +50,6 @@ Piensa en DDD como el "qué" y Arquitectura Hexagonal como el "cómo":
 | Resultado | Entidades, Value Objects, Agregados, Eventos | Capas, Puertos, Adaptadores |
 | Beneficio principal | Software que refleja el negocio | Software desacoplado y mantenible |
 
-Ambos se complementan perfectamente: DDD te dice qué construir en el centro (el dominio), y Arquitectura Hexagonal te dice cómo proteger ese centro del mundo exterior.
-
 ---
 
 # 2. Domain-Driven Design (DDD): El Corazón del Sistema
@@ -79,7 +77,7 @@ Con Lenguaje Ubicuo, ambos usan los mismos términos con el mismo significado. E
 **Sin Lenguaje Ubicuo:**
 ```
 - Negocio dice: "El cliente reserva una habitación"
-- Código dice: updateRoomStatus(roomId, 'BLOCKED', customerId)
+- Código dice: updateRoomStatus(roomId, "BLOCKED", customerId)
 ```
 
 **Con Lenguaje Ubicuo:**
@@ -87,8 +85,6 @@ Con Lenguaje Ubicuo, ambos usan los mismos términos con el mismo significado. E
 - Negocio dice: "El cliente reserva una habitación"
 - Código dice: room.reserveFor(customer)
 ```
-
-El segundo ejemplo es código que cualquier persona del negocio podría leer y validar.
 
 ## 2.3 Bounded Contexts (Contextos Delimitados)
 
@@ -103,8 +99,6 @@ En una empresa real, la misma palabra puede significar cosas diferentes según e
 - Para **Ventas**, un "Cliente" es alguien con datos de contacto y un historial de compras
 - Para **Facturación**, un "Cliente" es una entidad con datos fiscales y condiciones de pago  
 - Para **Envíos**, un "Cliente" es simplemente una dirección de entrega
-
-Intentar crear un único modelo de "Cliente" que satisfaga a todos resulta en una clase gigante, confusa e imposible de mantener. Los Bounded Contexts permiten que cada área tenga su propio modelo, optimizado para sus necesidades.
 
 ### Ejemplo visual
 
@@ -121,19 +115,8 @@ Intentar crear un único modelo de "Cliente" que satisfaga a todos resulta en un
 │  │  - Carrito       │  │  - Almacén       │  │  - Destinatario│ │
 │  │  - Producto*     │  │  - Movimiento    │  │  - Tracking    │ │
 │  └──────────────────┘  └──────────────────┘  └────────────────┘ │
-│                                                                  │
-│  * "Producto" en Ventas tiene precio y descripción comercial    │
-│    "Producto" en Inventario tiene dimensiones y ubicación       │
 └─────────────────────────────────────────────────────────────────┘
 ```
-
-### Cómo se comunican los contextos
-
-Los Bounded Contexts no viven aislados; necesitan compartir información. Esto se hace mediante:
-
-- **Eventos de dominio**: Un contexto publica que algo ocurrió, otros reaccionan
-- **APIs internas**: Un contexto expone servicios que otros consumen
-- **Shared Kernel**: Código compartido mínimo cuando es estrictamente necesario
 
 ## 2.4 Entidades (Entities)
 
@@ -141,93 +124,138 @@ Los Bounded Contexts no viven aislados; necesitan compartir información. Esto s
 
 Una Entidad es un objeto que tiene **identidad única** que persiste a lo largo del tiempo, independientemente de cómo cambien sus atributos.
 
-### La clave: Identidad vs. Atributos
-
-Piensa en una persona. Juan García puede cambiar de dirección, de trabajo, incluso de nombre, pero sigue siendo la misma persona. Lo que lo define no son sus atributos (que cambian), sino su identidad (que permanece).
-
-Lo mismo ocurre con un Pedido en un sistema. El pedido #12345 puede cambiar de estado (pendiente → confirmado → enviado), pueden agregarse o quitarse productos, puede modificarse la dirección de envío. Pero sigue siendo el pedido #12345.
-
 ### Características de una Entidad
 
 1. **Tiene un identificador único** (ID, UUID, código de negocio)
 2. **Su identidad no cambia** aunque cambien todos sus demás atributos
-3. **Dos entidades son iguales si tienen el mismo ID**, sin importar sus otros valores
-4. **Tiene ciclo de vida**: nace, cambia de estado, eventualmente "muere" o se archiva
+3. **Dos entidades son iguales si tienen el mismo ID**
+4. **Tiene ciclo de vida**: nace, cambia de estado, eventualmente "muere"
 
-### Ejemplo conceptual
+### Ejemplo en código (Java 21)
 
-Un `Customer` es una Entidad porque:
-- Tiene un ID único (ej: `customer-7829`)
-- Puede cambiar de email, dirección, teléfono
-- Sigue siendo el mismo cliente aunque cambie todo lo demás
-- Dos clientes con el mismo nombre NO son el mismo cliente
+```java
+// domain/entity/Order.java
 
-### Ejemplo en código
-
-```typescript
-// domain/entities/Order.ts
-
-export class Order {
-  // El ID es inmutable - define la identidad
-  private readonly id: OrderId;
-  
-  // Estos atributos pueden cambiar
-  private items: OrderItem[];
-  private status: OrderStatus;
-  private shippingAddress: Address;
-  
-  // Fecha de creación - parte del ciclo de vida
-  private readonly createdAt: Date;
-
-  private constructor(
-    id: OrderId,
-    customerId: CustomerId,
-    items: OrderItem[],
-    status: OrderStatus
-  ) {
-    this.id = id;
-    this.customerId = customerId;
-    this.items = items;
-    this.status = status;
-    this.createdAt = new Date();
-  }
-
-  // Factory method - la forma correcta de crear entidades
-  // Encapsula las reglas de creación
-  static create(customerId: CustomerId): Order {
-    return new Order(
-      OrderId.generate(),
-      customerId,
-      [],
-      OrderStatus.PENDING
-    );
-  }
-
-  // Los métodos expresan comportamiento de negocio
-  // No son simples setters
-  addItem(product: Product, quantity: number): void {
-    // Regla de negocio: solo pedidos pendientes pueden modificarse
-    if (this.status !== OrderStatus.PENDING) {
-      throw new OrderCannotBeModifiedError(this.id);
-    }
+public class Order {
     
-    const item = OrderItem.create(product, quantity);
-    this.items.push(item);
-  }
-
-  confirm(): void {
-    // Regla de negocio: no se puede confirmar un pedido vacío
-    if (this.items.length === 0) {
-      throw new EmptyOrderCannotBeConfirmedError(this.id);
-    }
+    // El ID es inmutable - define la identidad
+    private final OrderId id;
+    private final CustomerId customerId;
+    private final Instant createdAt;
     
-    this.status = OrderStatus.CONFIRMED;
-  }
+    // Estos atributos pueden cambiar
+    private List<OrderItem> items;
+    private OrderStatus status;
+    private Address shippingAddress;
+    
+    // Lista de eventos de dominio pendientes
+    private final List<DomainEvent> domainEvents = new ArrayList<>();
 
-  // Dos pedidos son iguales si tienen el mismo ID
-  equals(other: Order): boolean {
-    return this.id.equals(other.id);
-  }
+    // Constructor privado - fuerza a usar factory method
+    private Order(OrderId id, CustomerId customerId) {
+        this.id = id;
+        this.customerId = customerId;
+        this.items = new ArrayList<>();
+        this.status = OrderStatus.PENDING;
+        this.createdAt = Instant.now();
+    }
+
+    // Factory method - la forma correcta de crear entidades
+    public static Order create(CustomerId customerId) {
+        var order = new Order(OrderId.generate(), customerId);
+        
+        order.recordEvent(new OrderCreatedEvent(
+            order.id.value(),
+            customerId.value(),
+            order.createdAt
+        ));
+        
+        return order;
+    }
+
+    // Los métodos expresan comportamiento de negocio
+    public void addItem(Product product, int quantity) {
+        // Regla de negocio: solo pedidos pendientes pueden modificarse
+        if (status != OrderStatus.PENDING) {
+            throw new OrderCannotBeModifiedException(id);
+        }
+        
+        if (quantity <= 0) {
+            throw new InvalidQuantityException(quantity);
+        }
+        
+        // Buscar si ya existe el producto
+        var existingItem = findItemByProduct(product.getId());
+        
+        if (existingItem.isPresent()) {
+            existingItem.get().increaseQuantity(quantity);
+        } else {
+            items.add(OrderItem.create(product, quantity));
+        }
+    }
+
+    public void confirm() {
+        // Regla de negocio: no se puede confirmar un pedido vacío
+        if (items.isEmpty()) {
+            throw new EmptyOrderCannotBeConfirmedException(id);
+        }
+        
+        if (status != OrderStatus.PENDING) {
+            throw new InvalidOrderStateTransitionException(status, OrderStatus.CONFIRMED);
+        }
+        
+        this.status = OrderStatus.CONFIRMED;
+        
+        recordEvent(new OrderConfirmedEvent(
+            id.value(),
+            customerId.value(),
+            calculateTotal(),
+            Instant.now()
+        ));
+    }
+
+    public Money calculateTotal() {
+        return items.stream()
+            .map(OrderItem::subtotal)
+            .reduce(Money.zero(Currency.USD), Money::add);
+    }
+
+    private Optional<OrderItem> findItemByProduct(ProductId productId) {
+        return items.stream()
+            .filter(item -> item.getProductId().equals(productId))
+            .findFirst();
+    }
+
+    // Dos pedidos son iguales si tienen el mismo ID
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Order other)) return false;
+        return id.equals(other.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
+    }
+
+    // Gestión de eventos de dominio
+    protected void recordEvent(DomainEvent event) {
+        domainEvents.add(event);
+    }
+
+    public List<DomainEvent> pullDomainEvents() {
+        var events = List.copyOf(domainEvents);
+        domainEvents.clear();
+        return events;
+    }
+
+    // Getters (sin setters públicos)
+    public OrderId getId() { return id; }
+    public CustomerId getCustomerId() { return customerId; }
+    public OrderStatus getStatus() { return status; }
+    public List<OrderItem> getItems() { return List.copyOf(items); }
+    public Instant getCreatedAt() { return createdAt; }
 }
 ```
 
@@ -236,6 +264,7 @@ export class Order {
 - Los métodos tienen nombres de negocio (`confirm`, no `setStatus`)
 - Las reglas de negocio viven dentro de la entidad
 - No hay setters públicos - el estado cambia mediante comportamiento
+- Usamos `List.copyOf()` para retornar copias inmutables
 
 ## 2.5 Value Objects (Objetos de Valor)
 
@@ -243,94 +272,142 @@ export class Order {
 
 Un Value Object es un objeto que se define completamente por sus atributos, no tiene identidad propia, y es inmutable.
 
-### La clave: Igualdad por valor
-
-Piensa en el dinero. Un billete de $100 es igual a cualquier otro billete de $100. No nos importa "cuál" billete específico es (su identidad), solo nos importa su valor. Si tienes dos billetes de $100, son intercambiables.
-
-Lo mismo con una dirección: "Calle Principal 123, Ciudad X" es igual a otra instancia que tenga exactamente los mismos valores, no porque sean "la misma dirección" con un ID, sino porque sus valores son idénticos.
-
 ### Características de un Value Object
 
 1. **Sin identidad**: No tiene ID, se define por sus atributos
-2. **Inmutable**: Una vez creado, no cambia. Si necesitas un valor diferente, creas uno nuevo
+2. **Inmutable**: Una vez creado, no cambia
 3. **Igualdad por valor**: Dos Value Objects son iguales si todos sus atributos son iguales
 4. **Auto-validante**: Se valida en el momento de creación
 
-### ¿Por qué usar Value Objects?
+### Ejemplo en código: Money (usando Record de Java 21)
 
-**Sin Value Objects:**
-```typescript
-// ¿Es válido un precio negativo? ¿Quién lo valida?
-order.price = -50;
+```java
+// domain/valueobject/Money.java
 
-// ¿Puedo sumar dólares con euros? El compilador no me detiene
-const total = priceInUSD + priceInEUR;
+public record Money(BigDecimal amount, Currency currency) {
+    
+    // Constructor compacto con validación
+    public Money {
+        Objects.requireNonNull(amount, "Amount cannot be null");
+        Objects.requireNonNull(currency, "Currency cannot be null");
+        
+        if (amount.compareTo(BigDecimal.ZERO) < 0) {
+            throw new InvalidMoneyAmountException(amount);
+        }
+    }
 
-// ¿Es este un email válido? Quién sabe...
-customer.email = "esto no es un email";
+    // Factory methods
+    public static Money of(BigDecimal amount, Currency currency) {
+        return new Money(amount, currency);
+    }
+
+    public static Money of(double amount, Currency currency) {
+        return new Money(BigDecimal.valueOf(amount), currency);
+    }
+
+    public static Money zero(Currency currency) {
+        return new Money(BigDecimal.ZERO, currency);
+    }
+
+    // Operaciones que retornan NUEVAS instancias (inmutabilidad)
+    public Money add(Money other) {
+        ensureSameCurrency(other);
+        return new Money(this.amount.add(other.amount), this.currency);
+    }
+
+    public Money subtract(Money other) {
+        ensureSameCurrency(other);
+        var result = this.amount.subtract(other.amount);
+        if (result.compareTo(BigDecimal.ZERO) < 0) {
+            throw new InsufficientFundsException(this, other);
+        }
+        return new Money(result, this.currency);
+    }
+
+    public Money multiply(int factor) {
+        return new Money(this.amount.multiply(BigDecimal.valueOf(factor)), this.currency);
+    }
+
+    public boolean isGreaterThan(Money other) {
+        ensureSameCurrency(other);
+        return this.amount.compareTo(other.amount) > 0;
+    }
+
+    private void ensureSameCurrency(Money other) {
+        if (!this.currency.equals(other.currency)) {
+            throw new CurrencyMismatchException(this.currency, other.currency);
+        }
+    }
+}
 ```
 
-**Con Value Objects:**
-```typescript
-// El Value Object rechaza valores inválidos al crearse
-const price = Money.of(-50, 'USD'); // ¡Error! Cantidad negativa
+### Otros Value Objects comunes
 
-// El Value Object previene operaciones sin sentido
-const total = usdMoney.add(eurMoney); // ¡Error! Monedas diferentes
+```java
+// domain/valueobject/Email.java
 
-// El Value Object valida el formato
-const email = Email.create("esto no es un email"); // ¡Error! Formato inválido
-```
+public record Email(String value) {
+    
+    private static final Pattern EMAIL_PATTERN = 
+        Pattern.compile("^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
 
-### Ejemplo en código: Money
-
-```typescript
-// domain/value-objects/Money.ts
-
-export class Money {
-  // Propiedades privadas e inmutables
-  private constructor(
-    private readonly amount: number,
-    private readonly currency: Currency
-  ) {
-    // Validación en construcción - si llega aquí, es válido
-    if (amount < 0) {
-      throw new InvalidMoneyAmountError(amount);
+    public Email {
+        Objects.requireNonNull(value, "Email cannot be null");
+        var normalized = value.toLowerCase().trim();
+        if (!EMAIL_PATTERN.matcher(normalized).matches()) {
+            throw new InvalidEmailException(value);
+        }
     }
-  }
 
-  // Factory methods - formas controladas de crear instancias
-  static of(amount: number, currency: Currency): Money {
-    return new Money(amount, currency);
-  }
-
-  static zero(currency: Currency = Currency.USD): Money {
-    return new Money(0, currency);
-  }
-
-  // Operaciones que retornan NUEVAS instancias (inmutabilidad)
-  add(other: Money): Money {
-    this.ensureSameCurrency(other);
-    // No modificamos this.amount, creamos un nuevo Money
-    return new Money(this.amount + other.amount, this.currency);
-  }
-
-  multiply(factor: number): Money {
-    return new Money(this.amount * factor, this.currency);
-  }
-
-  // Igualdad por valor, no por referencia
-  equals(other: Money): boolean {
-    return this.amount === other.amount && 
-           this.currency === other.currency;
-  }
-
-  // Validación interna
-  private ensureSameCurrency(other: Money): void {
-    if (this.currency !== other.currency) {
-      throw new CurrencyMismatchError(this.currency, other.currency);
+    public static Email of(String value) {
+        return new Email(value.toLowerCase().trim());
     }
-  }
+}
+
+
+// domain/valueobject/OrderId.java
+
+public record OrderId(String value) {
+    
+    public OrderId {
+        Objects.requireNonNull(value, "OrderId cannot be null");
+        if (value.isBlank()) {
+            throw new InvalidOrderIdException("OrderId cannot be blank");
+        }
+    }
+
+    public static OrderId generate() {
+        return new OrderId(UUID.randomUUID().toString());
+    }
+
+    public static OrderId of(String value) {
+        return new OrderId(value);
+    }
+}
+
+
+// domain/valueobject/Address.java
+
+public record Address(
+    String street,
+    String city,
+    String state,
+    String zipCode,
+    String country
+) {
+    public Address {
+        Objects.requireNonNull(street, "Street cannot be null");
+        Objects.requireNonNull(city, "City cannot be null");
+        Objects.requireNonNull(country, "Country cannot be null");
+        
+        if (street.isBlank() || city.isBlank() || country.isBlank()) {
+            throw new InvalidAddressException("Street, city and country are required");
+        }
+    }
+
+    public String fullAddress() {
+        return "%s, %s, %s %s, %s".formatted(street, city, state, zipCode, country);
+    }
 }
 ```
 

@@ -6,111 +6,145 @@
 
 Un Puerto es una **interfaz** que define un contrato de comunicación. Es una abstracción que dice "qué se puede hacer" sin decir "cómo se hace".
 
-Los puertos son el pegamento conceptual entre el interior y el exterior del hexágono.
-
 ## 4.2 Puertos Primarios (Driving Ports)
 
 ### ¿Qué son?
 
 Los Puertos Primarios definen **cómo el mundo exterior puede usar nuestra aplicación**. Son los casos de uso que exponemos.
 
-### Analogía
+### Ejemplo (Java 21)
 
-Piensa en el menú de un restaurante. El menú (puerto primario) te dice qué puedes pedir. No te dice cómo se cocina (implementación), solo qué opciones tienes.
+```java
+// application/port/input/OrderUseCases.java
 
-### Ejemplo
-
-```typescript
-// application/ports/primary/OrderUseCases.ts
-
-export interface OrderUseCases {
-  // Comandos - modifican estado
-  createOrder(command: CreateOrderCommand): Promise<OrderId>;
-  addItemToOrder(command: AddItemCommand): Promise<void>;
-  confirmOrder(command: ConfirmOrderCommand): Promise<void>;
-  cancelOrder(command: CancelOrderCommand): Promise<void>;
-  
-  // Queries - solo leen
-  getOrder(query: GetOrderQuery): Promise<OrderDTO>;
-  listCustomerOrders(query: ListOrdersQuery): Promise<OrderDTO[]>;
+public interface OrderUseCases {
+    
+    // Comandos - modifican estado
+    OrderId createOrder(CreateOrderCommand command);
+    void addItemToOrder(AddItemCommand command);
+    void confirmOrder(ConfirmOrderCommand command);
+    void cancelOrder(CancelOrderCommand command);
+    
+    // Queries - solo leen
+    OrderDTO getOrder(GetOrderQuery query);
+    List<OrderDTO> listCustomerOrders(ListOrdersQuery query);
+    Page<OrderDTO> searchOrders(SearchOrdersQuery query, Pageable pageable);
 }
 
-export interface CreateOrderCommand {
-  customerId: string;
-  items: Array<{
-    productId: string;
-    quantity: number;
-  }>;
-  shippingAddress?: AddressDTO;
+
+// application/port/input/command/CreateOrderCommand.java
+
+public record CreateOrderCommand(
+    String customerId,
+    List<OrderItemRequest> items,
+    AddressRequest shippingAddress
+) {
+    public record OrderItemRequest(String productId, int quantity) {}
+    public record AddressRequest(String street, String city, String state, 
+                                  String zipCode, String country) {}
 }
+
+
+// application/port/input/command/ConfirmOrderCommand.java
+
+public record ConfirmOrderCommand(String orderId) {}
+
+
+// application/port/input/query/GetOrderQuery.java
+
+public record GetOrderQuery(String orderId) {}
 ```
 
 ## 4.3 Puertos Secundarios (Driven Ports)
 
 ### ¿Qué son?
 
-Los Puertos Secundarios definen **qué necesita nuestra aplicación del mundo exterior**. Son las dependencias que requerimos pero no queremos implementar directamente.
+Los Puertos Secundarios definen **qué necesita nuestra aplicación del mundo exterior**.
 
-### Analogía
+### Ejemplos (Java 21)
 
-Piensa en un enchufe eléctrico. Tu computadora necesita electricidad, pero no le importa si viene de una planta nuclear, solar, o eólica. El enchufe (puerto secundario) define "necesito electricidad con estas características", no cómo se genera.
+```java
+// application/port/output/PaymentGateway.java
 
-### Ejemplos
+public interface PaymentGateway {
+    
+    PaymentResult processPayment(PaymentRequest request);
+    RefundResult refund(String transactionId, Money amount);
+    PaymentStatus getTransactionStatus(String transactionId);
+}
 
-```typescript
-// application/ports/secondary/OrderRepository.ts
+public record PaymentRequest(
+    OrderId orderId,
+    Money amount,
+    CustomerId customerId,
+    PaymentMethod paymentMethod
+) {}
 
-export interface OrderRepository {
-  save(order: Order): Promise<void>;
-  findById(id: OrderId): Promise<Order | null>;
-  findByCustomer(customerId: CustomerId): Promise<Order[]>;
-  delete(id: OrderId): Promise<void>;
-  nextId(): OrderId;
+public record PaymentResult(
+    boolean success,
+    String transactionId,
+    Instant processedAt,
+    String errorMessage
+) {
+    public static PaymentResult successful(String transactionId) {
+        return new PaymentResult(true, transactionId, Instant.now(), null);
+    }
+    
+    public static PaymentResult failed(String errorMessage) {
+        return new PaymentResult(false, null, Instant.now(), errorMessage);
+    }
 }
 
 
-// application/ports/secondary/PaymentGateway.ts
+// application/port/output/NotificationService.java
 
-export interface PaymentGateway {
-  processPayment(request: PaymentRequest): Promise<PaymentResult>;
-  refund(transactionId: string, amount: Money): Promise<RefundResult>;
-  getTransactionStatus(transactionId: string): Promise<TransactionStatus>;
+public interface NotificationService {
+    
+    void sendEmail(EmailNotification notification);
+    void sendSMS(SMSNotification notification);
+    void sendPush(PushNotification notification);
+}
+
+public record EmailNotification(
+    Email to,
+    String subject,
+    String templateId,
+    Map<String, Object> data
+) {}
+
+
+// application/port/output/EventPublisher.java
+
+public interface EventPublisher {
+    
+    void publish(DomainEvent event);
+    void publishAll(List<DomainEvent> events);
 }
 
 
-// application/ports/secondary/NotificationService.ts
+// application/port/output/InventoryService.java
 
-export interface NotificationService {
-  sendEmail(notification: EmailNotification): Promise<void>;
-  sendSMS(notification: SMSNotification): Promise<void>;
-  sendPush(notification: PushNotification): Promise<void>;
+public interface InventoryService {
+    
+    InventoryReservation reserve(ReservationRequest request);
+    void confirmReservation(String reservationId);
+    void releaseReservation(String reservationId);
+    boolean checkAvailability(ProductId productId, int quantity);
 }
 
-
-// application/ports/secondary/EventPublisher.ts
-
-export interface EventPublisher {
-  publish(event: DomainEvent): Promise<void>;
-  publishAll(events: DomainEvent[]): Promise<void>;
+public record ReservationRequest(
+    String orderId,
+    List<ReservationItem> items
+) {
+    public record ReservationItem(String productId, int quantity) {}
 }
-```
 
-## 4.4 Puerto vs Adaptador: La Diferencia Clave
-
-| Aspecto | Puerto | Adaptador |
-|---------|--------|-----------|
-| ¿Qué es? | Interface (contrato) | Clase (implementación) |
-| ¿Dónde vive? | Dominio o Aplicación | Infraestructura |
-| ¿Conoce tecnología? | No | Sí |
-| ¿Cuántos puede haber? | Uno por concepto | Múltiples por puerto |
-
-**Un puerto, múltiples adaptadores:**
-```
-Puerto: NotificationService
-  ├── Adaptador: SendGridEmailService (producción)
-  ├── Adaptador: SESEmailService (alternativa AWS)
-  ├── Adaptador: ConsoleNotificationService (desarrollo)
-  └── Adaptador: MockNotificationService (testing)
+public record InventoryReservation(
+    String id,
+    String orderId,
+    Instant expiresAt,
+    List<ReservationItem> items
+) {}
 ```
 
 ---
@@ -121,421 +155,529 @@ Puerto: NotificationService
 
 Un Adaptador es una **implementación concreta de un puerto**. Traduce entre el lenguaje del dominio y el lenguaje de una tecnología específica.
 
-### Analogía
-
-Un adaptador de corriente convierte el voltaje de un país al que necesita tu dispositivo. De la misma forma, un adaptador de software convierte entre formatos: de JSON a objetos de dominio, de objetos de dominio a filas de base de datos, etc.
-
 ## 5.2 Adaptadores Primarios (Driving Adapters)
 
-### ¿Qué son?
+### Ejemplo: Adaptador REST con Spring Boot
 
-Reciben peticiones del exterior y las convierten en llamadas a los puertos primarios.
+```java
+// infrastructure/adapter/input/rest/OrderController.java
 
-### Flujo
-
-```
-Usuario → [HTTP Request] → Adaptador REST → [Command/Query] → Puerto Primario → Aplicación
-```
-
-### Ejemplo: Adaptador REST
-
-```typescript
-// infrastructure/adapters/primary/rest/OrderController.ts
-
-@Controller('orders')
-export class OrderController {
-  constructor(
-    @Inject('OrderUseCases')
-    private readonly orderUseCases: OrderUseCases
-  ) {}
-
-  @Post()
-  @HttpCode(201)
-  async createOrder(
-    @Body() body: CreateOrderRequestDTO
-  ): Promise<CreateOrderResponseDTO> {
+@RestController
+@RequestMapping("/api/v1/orders")
+@RequiredArgsConstructor
+public class OrderController {
     
-    // 1. Traducir de HTTP a Command de dominio
-    const command: CreateOrderCommand = {
-      customerId: body.customer_id,  // snake_case → camelCase
-      items: body.items.map(item => ({
-        productId: item.product_id,
-        quantity: item.qty
-      })),
-      shippingAddress: body.shipping_address 
-        ? this.mapAddress(body.shipping_address)
-        : undefined
-    };
+    private final OrderUseCases orderUseCases;
+    private final OrderDTOMapper mapper;
 
-    // 2. Delegar al caso de uso
-    const orderId = await this.orderUseCases.createOrder(command);
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public CreateOrderResponse createOrder(@Valid @RequestBody CreateOrderRequest request) {
+        
+        // 1. Traducir de HTTP Request a Command
+        var command = new CreateOrderCommand(
+            request.customerId(),
+            request.items().stream()
+                .map(item -> new CreateOrderCommand.OrderItemRequest(
+                    item.productId(), 
+                    item.quantity()
+                ))
+                .toList(),
+            request.shippingAddress() != null 
+                ? mapAddress(request.shippingAddress()) 
+                : null
+        );
 
-    // 3. Traducir respuesta a formato HTTP
-    return {
-      order_id: orderId.value,
-      status: 'created',
-      links: {
-        self: `/orders/${orderId.value}`,
-        confirm: `/orders/${orderId.value}/confirm`
-      }
-    };
-  }
+        // 2. Delegar al caso de uso
+        var orderId = orderUseCases.createOrder(command);
 
-  @Get(':id')
-  async getOrder(@Param('id') id: string): Promise<OrderResponseDTO> {
-    const order = await this.orderUseCases.getOrder({ orderId: id });
-    return this.mapToResponse(order);
-  }
+        // 3. Traducir respuesta a formato HTTP
+        return new CreateOrderResponse(
+            orderId.value(),
+            "created",
+            Map.of(
+                "self", "/api/v1/orders/" + orderId.value(),
+                "confirm", "/api/v1/orders/" + orderId.value() + "/confirm"
+            )
+        );
+    }
 
-  @Post(':id/confirm')
-  @HttpCode(200)
-  async confirmOrder(@Param('id') id: string): Promise<void> {
-    await this.orderUseCases.confirmOrder({ orderId: id });
-  }
+    @GetMapping("/{orderId}")
+    public OrderResponse getOrder(@PathVariable String orderId) {
+        var query = new GetOrderQuery(orderId);
+        var order = orderUseCases.getOrder(query);
+        return mapper.toResponse(order);
+    }
+
+    @PostMapping("/{orderId}/confirm")
+    @ResponseStatus(HttpStatus.OK)
+    public void confirmOrder(@PathVariable String orderId) {
+        orderUseCases.confirmOrder(new ConfirmOrderCommand(orderId));
+    }
+
+    @PostMapping("/{orderId}/cancel")
+    @ResponseStatus(HttpStatus.OK)
+    public void cancelOrder(
+            @PathVariable String orderId,
+            @RequestBody CancelOrderRequest request) {
+        orderUseCases.cancelOrder(new CancelOrderCommand(orderId, request.reason()));
+    }
+
+    @GetMapping
+    public Page<OrderResponse> searchOrders(
+            @RequestParam(required = false) String customerId,
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        
+        var query = new SearchOrdersQuery(customerId, status);
+        var pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        
+        return orderUseCases.searchOrders(query, pageable)
+            .map(mapper::toResponse);
+    }
+
+    private CreateOrderCommand.AddressRequest mapAddress(AddressRequest address) {
+        return new CreateOrderCommand.AddressRequest(
+            address.street(),
+            address.city(),
+            address.state(),
+            address.zipCode(),
+            address.country()
+        );
+    }
+}
+
+
+// infrastructure/adapter/input/rest/dto/CreateOrderRequest.java
+
+public record CreateOrderRequest(
+    @NotBlank String customerId,
+    @NotEmpty List<OrderItemRequest> items,
+    AddressRequest shippingAddress
+) {
+    public record OrderItemRequest(
+        @NotBlank String productId,
+        @Min(1) int quantity
+    ) {}
+    
+    public record AddressRequest(
+        @NotBlank String street,
+        @NotBlank String city,
+        String state,
+        String zipCode,
+        @NotBlank String country
+    ) {}
+}
+
+public record CreateOrderResponse(
+    String orderId,
+    String status,
+    Map<String, String> links
+) {}
+
+public record OrderResponse(
+    String id,
+    String customerId,
+    String status,
+    List<OrderItemResponse> items,
+    MoneyResponse total,
+    Instant createdAt
+) {
+    public record OrderItemResponse(
+        String productId,
+        String productName,
+        int quantity,
+        MoneyResponse unitPrice,
+        MoneyResponse subtotal
+    ) {}
+    
+    public record MoneyResponse(BigDecimal amount, String currency) {}
 }
 ```
 
 ### Ejemplo: Adaptador CLI
 
-```typescript
-// infrastructure/adapters/primary/cli/OrderCLI.ts
+```java
+// infrastructure/adapter/input/cli/OrderCLI.java
 
-export class OrderCLI {
-  constructor(private readonly orderUseCases: OrderUseCases) {}
+@Component
+@RequiredArgsConstructor
+public class OrderCLI implements CommandLineRunner {
+    
+    private final OrderUseCases orderUseCases;
+    private final ObjectMapper objectMapper;
 
-  async run(args: string[]): Promise<void> {
-    const [command, ...params] = args;
+    @Override
+    public void run(String... args) throws Exception {
+        if (args.length == 0) return;
+        
+        var command = args[0];
+        var params = Arrays.copyOfRange(args, 1, args.length);
 
-    switch (command) {
-      case 'create':
-        await this.handleCreate(params);
-        break;
-      case 'confirm':
-        await this.handleConfirm(params);
-        break;
-      case 'show':
-        await this.handleShow(params);
-        break;
-      default:
-        this.showHelp();
+        switch (command) {
+            case "order:create" -> handleCreate(params);
+            case "order:confirm" -> handleConfirm(params);
+            case "order:show" -> handleShow(params);
+            case "order:list" -> handleList(params);
+            default -> showHelp();
+        }
     }
-  }
 
-  private async handleCreate(params: string[]): Promise<void> {
-    const customerId = params[0];
-    const items = this.parseItems(params.slice(1));
+    private void handleCreate(String[] params) {
+        if (params.length < 2) {
+            System.err.println("Usage: order:create <customerId> <productId:quantity>...");
+            return;
+        }
 
-    const orderId = await this.orderUseCases.createOrder({
-      customerId,
-      items
-    });
+        var customerId = params[0];
+        var items = Arrays.stream(params)
+            .skip(1)
+            .map(this::parseItem)
+            .toList();
 
-    console.log(`✓ Pedido creado: ${orderId.value}`);
-  }
+        var command = new CreateOrderCommand(customerId, items, null);
+        var orderId = orderUseCases.createOrder(command);
+
+        System.out.println("✓ Order created: " + orderId.value());
+    }
+
+    private void handleConfirm(String[] params) {
+        if (params.length < 1) {
+            System.err.println("Usage: order:confirm <orderId>");
+            return;
+        }
+
+        orderUseCases.confirmOrder(new ConfirmOrderCommand(params[0]));
+        System.out.println("✓ Order confirmed");
+    }
+
+    private void handleShow(String[] params) throws Exception {
+        if (params.length < 1) {
+            System.err.println("Usage: order:show <orderId>");
+            return;
+        }
+
+        var order = orderUseCases.getOrder(new GetOrderQuery(params[0]));
+        System.out.println(objectMapper.writerWithDefaultPrettyPrinter()
+            .writeValueAsString(order));
+    }
+
+    private CreateOrderCommand.OrderItemRequest parseItem(String itemStr) {
+        var parts = itemStr.split(":");
+        return new CreateOrderCommand.OrderItemRequest(parts[0], Integer.parseInt(parts[1]));
+    }
 }
 ```
-
-**Observa**: Ambos adaptadores (REST y CLI) usan el MISMO puerto `OrderUseCases`. La lógica de negocio no sabe si la petición vino de HTTP o de la terminal.
 
 ## 5.3 Adaptadores Secundarios (Driven Adapters)
 
-### ¿Qué son?
+### Ejemplo: Adaptador de Persistencia con JPA
 
-Implementan los puertos secundarios, conectando la aplicación con servicios externos como bases de datos, APIs, colas de mensajes, etc.
+```java
+// infrastructure/adapter/output/persistence/JpaOrderRepository.java
 
-### Ejemplo: Adaptador de Persistencia (PostgreSQL)
-
-```typescript
-// infrastructure/adapters/secondary/persistence/PostgresOrderRepository.ts
-
-export class PostgresOrderRepository implements OrderRepository {
-  constructor(
-    private readonly prisma: PrismaClient,
-    private readonly mapper: OrderPersistenceMapper
-  ) {}
-
-  async save(order: Order): Promise<void> {
-    const data = this.mapper.toPersistence(order);
-
-    await this.prisma.$transaction(async (tx) => {
-      await tx.order.upsert({
-        where: { id: data.id },
-        update: {
-          status: data.status,
-          total: data.total,
-          updatedAt: new Date()
-        },
-        create: {
-          id: data.id,
-          customerId: data.customerId,
-          status: data.status,
-          total: data.total,
-          createdAt: data.createdAt
-        }
-      });
-
-      // Sincronizar items
-      await tx.orderItem.deleteMany({ where: { orderId: data.id } });
-      await tx.orderItem.createMany({ data: data.items });
-    });
-  }
-
-  async findById(id: OrderId): Promise<Order | null> {
-    const data = await this.prisma.order.findUnique({
-      where: { id: id.value },
-      include: { items: true }
-    });
-
-    if (!data) return null;
-    return this.mapper.toDomain(data);
-  }
-}
-```
-
-### El Mapper: Traductor entre mundos
-
-```typescript
-// infrastructure/adapters/secondary/persistence/OrderPersistenceMapper.ts
-
-export class OrderPersistenceMapper {
-  
-  // Dominio → Persistencia
-  toPersistence(order: Order): OrderPersistenceModel {
-    return {
-      id: order.id.value,
-      customerId: order.customerId.value,
-      status: order.status,
-      total: order.total.getAmount(),
-      currency: order.total.getCurrency(),
-      createdAt: order.createdAt,
-      items: order.getItemsSummary().map(item => ({
-        productId: item.productId,
-        productName: item.productName,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice
-      }))
-    };
-  }
-
-  // Persistencia → Dominio
-  toDomain(data: OrderWithItems): Order {
-    const items = data.items.map(item => 
-      OrderItem.reconstitute(
-        ProductId.from(item.productId),
-        item.productName,
-        Money.of(item.unitPrice, data.currency as Currency),
-        item.quantity
-      )
-    );
-
-    return Order.reconstitute(
-      OrderId.from(data.id),
-      CustomerId.from(data.customerId),
-      items,
-      data.status as OrderStatus,
-      new Date(data.createdAt)
-    );
-  }
-}
-```
-
-### Ejemplo: Adaptador de Mensajería (RabbitMQ)
-
-```typescript
-// infrastructure/adapters/secondary/messaging/RabbitMQEventPublisher.ts
-
-export class RabbitMQEventPublisher implements EventPublisher {
-  constructor(
-    private readonly connection: Connection,
-    private readonly serializer: EventSerializer
-  ) {}
-
-  async publish(event: DomainEvent): Promise<void> {
-    const channel = await this.connection.createChannel();
+@Repository
+@RequiredArgsConstructor
+public class JpaOrderRepository implements OrderRepository {
     
-    try {
-      const exchange = `domain.${event.aggregateType.toLowerCase()}`;
-      const routingKey = event.eventType;
-      const message = this.serializer.serialize(event);
+    private final SpringDataOrderRepository springDataRepository;
+    private final OrderPersistenceMapper mapper;
 
-      await channel.assertExchange(exchange, 'topic', { durable: true });
-
-      channel.publish(
-        exchange,
-        routingKey,
-        Buffer.from(message),
-        {
-          persistent: true,
-          messageId: event.eventId,
-          timestamp: event.occurredOn.getTime(),
-          contentType: 'application/json'
-        }
-      );
-    } finally {
-      await channel.close();
+    @Override
+    @Transactional
+    public void save(Order order) {
+        var entity = mapper.toEntity(order);
+        springDataRepository.save(entity);
     }
-  }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Order> findById(OrderId id) {
+        return springDataRepository.findById(id.value())
+            .map(mapper::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Order> findByCustomer(CustomerId customerId) {
+        return springDataRepository.findByCustomerId(customerId.value())
+            .stream()
+            .map(mapper::toDomain)
+            .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Order> findByStatus(OrderStatus status) {
+        return springDataRepository.findByStatus(status.name())
+            .stream()
+            .map(mapper::toDomain)
+            .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Page<Order> findAll(Pageable pageable) {
+        return springDataRepository.findAll(pageable)
+            .map(mapper::toDomain);
+    }
+
+    @Override
+    public void delete(OrderId id) {
+        springDataRepository.deleteById(id.value());
+    }
+
+    @Override
+    public OrderId nextId() {
+        return OrderId.generate();
+    }
+
+    @Override
+    public boolean existsById(OrderId id) {
+        return springDataRepository.existsById(id.value());
+    }
+}
+
+
+// infrastructure/adapter/output/persistence/entity/OrderEntity.java
+
+@Entity
+@Table(name = "orders")
+@Getter @Setter
+@NoArgsConstructor
+public class OrderEntity {
+    
+    @Id
+    private String id;
+    
+    @Column(name = "customer_id", nullable = false)
+    private String customerId;
+    
+    @Column(nullable = false)
+    @Enumerated(EnumType.STRING)
+    private OrderStatusEntity status;
+    
+    @Column(name = "total_amount", precision = 19, scale = 4)
+    private BigDecimal totalAmount;
+    
+    @Column(name = "total_currency", length = 3)
+    private String totalCurrency;
+    
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+    
+    @Column(name = "updated_at")
+    private Instant updatedAt;
+    
+    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<OrderItemEntity> items = new ArrayList<>();
+    
+    @Version
+    private Long version;
+    
+    @PrePersist
+    void prePersist() {
+        createdAt = Instant.now();
+    }
+    
+    @PreUpdate
+    void preUpdate() {
+        updatedAt = Instant.now();
+    }
+}
+
+
+// infrastructure/adapter/output/persistence/mapper/OrderPersistenceMapper.java
+
+@Component
+public class OrderPersistenceMapper {
+    
+    public OrderEntity toEntity(Order order) {
+        var entity = new OrderEntity();
+        entity.setId(order.getId().value());
+        entity.setCustomerId(order.getCustomerId().value());
+        entity.setStatus(OrderStatusEntity.valueOf(order.getStatus().name()));
+        entity.setTotalAmount(order.calculateTotal().amount());
+        entity.setTotalCurrency(order.calculateTotal().currency().name());
+        entity.setCreatedAt(order.getCreatedAt());
+        
+        var itemEntities = order.getItems().stream()
+            .map(item -> toItemEntity(item, entity))
+            .toList();
+        entity.setItems(new ArrayList<>(itemEntities));
+        
+        return entity;
+    }
+    
+    public Order toDomain(OrderEntity entity) {
+        var items = entity.getItems().stream()
+            .map(this::toItemDomain)
+            .toList();
+        
+        return Order.reconstitute(
+            OrderId.of(entity.getId()),
+            CustomerId.of(entity.getCustomerId()),
+            items,
+            OrderStatus.valueOf(entity.getStatus().name()),
+            entity.getCreatedAt()
+        );
+    }
+    
+    private OrderItemEntity toItemEntity(OrderItem item, OrderEntity order) {
+        var entity = new OrderItemEntity();
+        entity.setOrder(order);
+        entity.setProductId(item.getProductId().value());
+        entity.setProductName(item.getProductName());
+        entity.setQuantity(item.getQuantity());
+        entity.setUnitPrice(item.getUnitPrice().amount());
+        entity.setUnitCurrency(item.getUnitPrice().currency().name());
+        return entity;
+    }
+    
+    private OrderItem toItemDomain(OrderItemEntity entity) {
+        return OrderItem.reconstitute(
+            ProductId.of(entity.getProductId()),
+            entity.getProductName(),
+            Money.of(entity.getUnitPrice(), Currency.valueOf(entity.getUnitCurrency())),
+            entity.getQuantity()
+        );
+    }
 }
 ```
 
----
+### Ejemplo: Adaptador de Mensajería con RabbitMQ
 
-# 6. Principio de Responsabilidad Única (SRP)
+```java
+// infrastructure/adapter/output/messaging/RabbitMQEventPublisher.java
 
-## 6.1 ¿Qué es el Principio de Responsabilidad Única?
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class RabbitMQEventPublisher implements EventPublisher {
+    
+    private final RabbitTemplate rabbitTemplate;
+    private final ObjectMapper objectMapper;
 
-El Principio de Responsabilidad Única (SRP) establece que **una clase debe tener una única razón para cambiar**. En otras palabras, cada clase debe hacer una sola cosa y hacerla bien.
+    @Override
+    public void publish(DomainEvent event) {
+        try {
+            var exchange = "domain." + event.aggregateType().toLowerCase();
+            var routingKey = event.eventType();
+            var message = objectMapper.writeValueAsString(event);
+            
+            rabbitTemplate.convertAndSend(
+                exchange,
+                routingKey,
+                message,
+                msg -> {
+                    msg.getMessageProperties().setMessageId(event.eventId());
+                    msg.getMessageProperties().setTimestamp(Date.from(event.occurredOn()));
+                    msg.getMessageProperties().setContentType("application/json");
+                    return msg;
+                }
+            );
+            
+            log.info("Published event {} to {}/{}", event.eventId(), exchange, routingKey);
+            
+        } catch (JsonProcessingException e) {
+            throw new EventPublishingException("Failed to serialize event", e);
+        }
+    }
 
-### La definición de Robert C. Martin
+    @Override
+    public void publishAll(List<DomainEvent> events) {
+        events.forEach(this::publish);
+    }
+}
 
-> "Una clase debe tener uno, y solo uno, motivo para cambiar."
 
-### ¿Qué es una "responsabilidad"?
+// infrastructure/adapter/output/messaging/InMemoryEventPublisher.java (para desarrollo)
 
-Una responsabilidad es un **eje de cambio**. Si puedes pensar en más de una razón por la que una clase podría necesitar modificarse, tiene más de una responsabilidad.
+@Component
+@Profile("dev")
+@Slf4j
+public class InMemoryEventPublisher implements EventPublisher {
+    
+    private final ApplicationEventPublisher applicationEventPublisher;
+    
+    public InMemoryEventPublisher(ApplicationEventPublisher publisher) {
+        this.applicationEventPublisher = publisher;
+    }
 
-## 6.2 SRP en el Dominio
+    @Override
+    public void publish(DomainEvent event) {
+        log.info("Publishing event in-memory: {}", event.eventType());
+        applicationEventPublisher.publishEvent(event);
+    }
 
-### Problema: Clase con múltiples responsabilidades
-
-```typescript
-// ❌ MAL: Esta clase hace demasiadas cosas
-class Order {
-  // Responsabilidad 1: Datos y reglas de negocio
-  addItem(product: Product, quantity: number): void { }
-  confirm(): void { }
-  
-  // Responsabilidad 2: Persistencia (¿por qué el pedido sabe de SQL?)
-  async saveToDatabase(connection: DBConnection): Promise<void> {
-    await connection.query('INSERT INTO orders...');
-  }
-  
-  // Responsabilidad 3: Notificaciones (¿por qué envía emails?)
-  async sendConfirmationEmail(emailService: EmailService): Promise<void> {
-    await emailService.send(this.customerEmail, 'Pedido confirmado');
-  }
-  
-  // Responsabilidad 4: Reportes
-  generateInvoicePDF(): Buffer { }
+    @Override
+    public void publishAll(List<DomainEvent> events) {
+        events.forEach(this::publish);
+    }
 }
 ```
 
-**Problemas:**
-- Si cambia la BD, hay que modificar `Order`
-- Si cambia el proveedor de email, hay que modificar `Order`
-- Testear es difícil: necesitas mockear DB, email, PDF
-- Un bug en facturación puede romper la lógica de pedidos
+### Ejemplo: Adaptador de Notificaciones con SendGrid
 
-### Solución: Separar responsabilidades
+```java
+// infrastructure/adapter/output/notification/SendGridNotificationService.java
 
-```typescript
-// ✅ BIEN: Cada clase tiene UNA responsabilidad
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class SendGridNotificationService implements NotificationService {
+    
+    private final SendGrid sendGridClient;
+    private final TemplateEngine templateEngine;
+    private final NotificationProperties properties;
 
-// Responsabilidad: Reglas de negocio del pedido
-class Order {
-  addItem(product: Product, quantity: number): void { }
-  confirm(): OrderConfirmedEvent { }
-  total(): Money { }
-}
+    @Override
+    public void sendEmail(EmailNotification notification) {
+        try {
+            var from = new com.sendgrid.helpers.mail.objects.Email(properties.getFromEmail());
+            var to = new com.sendgrid.helpers.mail.objects.Email(notification.to().value());
+            
+            // Renderizar template
+            var content = renderTemplate(notification.templateId(), notification.data());
+            
+            var mail = new Mail(from, notification.subject(), to, 
+                new Content("text/html", content));
+            
+            var request = new Request();
+            request.setMethod(Method.POST);
+            request.setEndpoint("mail/send");
+            request.setBody(mail.build());
+            
+            var response = sendGridClient.api(request);
+            
+            if (response.getStatusCode() >= 400) {
+                throw new NotificationException("SendGrid error: " + response.getBody());
+            }
+            
+            log.info("Email sent to {}", notification.to().value());
+            
+        } catch (IOException e) {
+            throw new NotificationException("Failed to send email", e);
+        }
+    }
 
-// Responsabilidad: Persistir pedidos
-class OrderRepository {
-  async save(order: Order): Promise<void> { }
-  async findById(id: OrderId): Promise<Order | null> { }
-}
+    @Override
+    public void sendSMS(SMSNotification notification) {
+        // Implementación con Twilio u otro proveedor
+        log.warn("SMS sending not implemented yet");
+    }
 
-// Responsabilidad: Enviar notificaciones de pedidos
-class OrderNotificationService {
-  async sendConfirmation(order: Order): Promise<void> { }
-}
+    @Override
+    public void sendPush(PushNotification notification) {
+        // Implementación con Firebase o similar
+        log.warn("Push notification not implemented yet");
+    }
 
-// Responsabilidad: Generar documentos de pedidos
-class OrderDocumentGenerator {
-  generateInvoice(order: Order): Buffer { }
-}
-```
-
-## 6.3 Separación Command/Query (CQRS light)
-
-Una aplicación muy efectiva de SRP es separar las operaciones de escritura de las de lectura.
-
-```typescript
-// Responsabilidad: Ejecutar comandos (modificar estado)
-class OrderCommandService {
-  constructor(
-    private readonly orderRepository: OrderRepository,
-    private readonly eventPublisher: EventPublisher
-  ) {}
-
-  async createOrder(command: CreateOrderCommand): Promise<OrderId> { }
-  async confirmOrder(command: ConfirmOrderCommand): Promise<void> { }
-}
-
-// Responsabilidad: Ejecutar queries (leer estado)
-class OrderQueryService {
-  constructor(private readonly orderReadRepository: OrderReadRepository) {}
-
-  async getOrder(query: GetOrderQuery): Promise<OrderDTO> { }
-  async listOrders(query: ListOrdersQuery): Promise<PaginatedResult<OrderDTO>> { }
-}
-```
-
-**Beneficios:**
-- Los comandos y queries pueden escalar independientemente
-- Los queries pueden usar bases de datos optimizadas para lectura
-- Más fácil de testear y razonar
-
-## 6.4 SRP en Event Handlers
-
-Cada handler tiene una única responsabilidad: reaccionar a un evento de una forma específica.
-
-```typescript
-// Responsabilidad: Enviar email de confirmación
-class SendOrderConfirmationEmailHandler {
-  async handle(event: OrderConfirmedEvent): Promise<void> {
-    await this.notificationService.sendEmail({
-      to: event.customerEmail,
-      templateId: 'order-confirmed',
-      data: { orderId: event.aggregateId }
-    });
-  }
-}
-
-// Responsabilidad: Reservar inventario
-class ReserveInventoryHandler {
-  async handle(event: OrderConfirmedEvent): Promise<void> {
-    await this.inventoryService.reserve({
-      orderId: event.aggregateId,
-      items: event.items
-    });
-  }
-}
-
-// Responsabilidad: Actualizar métricas
-class UpdateSalesMetricsHandler {
-  async handle(event: OrderConfirmedEvent): Promise<void> {
-    await this.analyticsService.recordSale({
-      orderId: event.aggregateId,
-      amount: event.totalAmount
-    });
-  }
+    private String renderTemplate(String templateId, Map<String, Object> data) {
+        var context = new Context();
+        context.setVariables(data);
+        return templateEngine.process(templateId, context);
+    }
 }
 ```
-
-**¿Por qué no un solo handler?**
-
-```typescript
-// ❌ MAL: Un handler con múltiples responsabilidades
-class OrderConfirmedMegaHandler {
-  async handle(event: OrderConfirmedEvent): Promise<void> {
-    await this.sendEmail(event);        // Si falla, ¿qué pasa?
-    await this.reserveInventory(event); // ¿Se reservó o no?
-    await this.updateMetrics(event);    // Todo junto o nada
-  }
-}
-```
-
-**Problemas:**
-- Si falla uno, fallan todos
-- No puedes reintentar uno sin reintentar todos
-- No puedes ejecutar algunos en paralelo
