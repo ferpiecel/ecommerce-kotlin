@@ -1,4 +1,61 @@
 services:
+  # ============================================
+  # Backend Service - Spring Boot Application
+  # ============================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shopnow-backend
+    ports:
+      - "8080:8080"
+    environment:
+      # Database connection (R2DBC)
+      SPRING_R2DBC_URL: r2dbc:postgresql://postgres:5432/${DATABASE_NAME:-shopnow}
+      SPRING_R2DBC_USERNAME: ${DATABASE_USER:-shopnow}
+      SPRING_R2DBC_PASSWORD: ${DATABASE_PASS:-shopnow}
+
+      # Database connection (JDBC for Flyway)
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DATABASE_NAME:-shopnow}
+      SPRING_DATASOURCE_USERNAME: ${DATABASE_USER:-shopnow}
+      SPRING_DATASOURCE_PASSWORD: ${DATABASE_PASS:-shopnow}
+
+      # Redis connection
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+
+      # Application settings
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker}
+      SERVER_PORT: 8080
+
+      # Flyway settings
+      SPRING_FLYWAY_ENABLED: true
+      SPRING_FLYWAY_BASELINE_ON_MIGRATE: true
+
+      # JVM settings for Docker
+      JAVA_OPTS: >-
+        -XX:+UseContainerSupport
+        -XX:MaxRAMPercentage=75.0
+        -XX:InitialRAMPercentage=50.0
+        -Djava.security.egd=file:/dev/./urandom
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - shopnow-network
+    restart: unless-stopped
+
+  # ============================================
+  # PostgreSQL Database
+  # ============================================
   postgres:
     image: postgres:17
     container_name: shopnow-postgres
@@ -20,6 +77,9 @@ services:
       - shopnow-network
     restart: unless-stopped
 
+  # ============================================
+  # Redis Cache
+  # ============================================
   redis:
     image: redis:7-alpine
     container_name: shopnow-redis
@@ -37,7 +97,11 @@ services:
       - shopnow-network
     restart: unless-stopped
 
-  # Redis Insight - Web UI for Redis (optional, for development)
+  # ============================================
+  # Development Tools (Profile: dev)
+  # ============================================
+
+  # Redis Insight - Web UI for Redis
   redis-insight:
     image: redis/redisinsight:latest
     container_name: shopnow-redis-insight
@@ -51,7 +115,7 @@ services:
     profiles:
       - dev
 
-  # pgAdmin - Web UI for PostgreSQL (optional, for development)
+  # pgAdmin - Web UI for PostgreSQL
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: shopnow-pgadmin
@@ -69,12 +133,24 @@ services:
     profiles:
       - dev
 
+# ============================================
+# Volumes
+# ============================================
+
 volumes:
   postgres_data:
+    driver: local
   redis_data:
+    driver: local
   redis_insight_data:
+    driver: local
   pgadmin_data:
+    driver: local
 
+# ============================================
+# Networks
+# ============================================
 networks:
   shopnow-network:
     driver: bridge
+    name: shopnow-network
